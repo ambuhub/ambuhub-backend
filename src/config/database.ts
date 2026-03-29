@@ -1,5 +1,8 @@
+const dns = require('dns');
 import mongoose from "mongoose";
 import { logger } from "../shared/lib/logger";
+
+dns.setServers(['1.1.1.1', '8.8.8.8']);
 
 /**
  * Connect to MongoDB database
