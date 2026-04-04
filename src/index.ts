@@ -1,6 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
 import { connectDatabase } from "./config/database";
+import { ensureServiceCategoryCatalogSeeded } from "./modules/serviceCategories/serviceCategories.service";
 import { setupRoutes } from "./routes/api";
 import { setupMiddleware } from "./shared/middlewares/middleware";
 import { logger } from "./shared/lib/logger";
@@ -23,6 +24,7 @@ const PORT = process.env.PORT || 3002;
 const startServer = async () => {
   try {
     await connectDatabase();
+    await ensureServiceCategoryCatalogSeeded();
     app.listen(PORT, () => {
       logger.info(`Server started on port ${PORT}`);
     });
