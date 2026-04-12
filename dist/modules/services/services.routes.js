@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const authenticate_1 = require("../../shared/middlewares/authenticate");
+const services_controller_1 = require("./services.controller");
+const router = (0, express_1.Router)();
+router.get("/marketplace", services_controller_1.getMarketplaceServices);
+router.get("/me", authenticate_1.authenticate, authenticate_1.requireServiceProvider, services_controller_1.getMyServices);
+router.post("/", authenticate_1.authenticate, authenticate_1.requireServiceProvider, services_controller_1.postCreateService);
+exports.default = router;

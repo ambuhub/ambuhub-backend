@@ -36,6 +36,15 @@ async function ensureServiceCategoryCatalogSeeded() {
             },
         }, { upsert: true, returnDocument: "after" });
     }
+    const allowedSlugs = serviceCategories_catalog_1.SERVICE_CATEGORY_CATALOG.map((c) => c.slug);
+    const pruneResult = await serviceCategory_model_1.ServiceCategory.deleteMany({
+        slug: { $nin: allowedSlugs },
+    });
+    if (pruneResult.deletedCount > 0) {
+        logger_1.logger.info("Removed obsolete service categories not in catalog", {
+            deletedCount: pruneResult.deletedCount,
+        });
+    }
     logger_1.logger.info("Service category catalog seeded", {
         count: serviceCategories_catalog_1.SERVICE_CATEGORY_CATALOG.length,
     });

@@ -38,8 +38,8 @@ async function scheduleEmailVerificationOtp(userId, email) {
         email,
     });
 }
-function signToken(userId, email, role) {
-    return jsonwebtoken_1.default.sign({ sub: userId, email, role }, requireEnvJwtSecret(), { expiresIn: JWT_EXPIRES });
+function signToken(userId, role) {
+    return jsonwebtoken_1.default.sign({ sub: userId, userId, role }, requireEnvJwtSecret(), { expiresIn: JWT_EXPIRES });
 }
 function toPublicUser(user) {
     return {
@@ -84,7 +84,7 @@ async function register(input) {
         throw err;
     }
     await scheduleEmailVerificationOtp(user._id.toString(), user.email);
-    const token = signToken(user._id.toString(), user.email, user.role);
+    const token = signToken(user._id.toString(), user.role);
     return {
         token,
         user: toPublicUser(user),
@@ -105,7 +105,7 @@ async function login(input) {
     if (!match) {
         throw new AuthHttpError(401, "Invalid email or password");
     }
-    const token = signToken(user._id.toString(), user.email, user.role);
+    const token = signToken(user._id.toString(), user.role);
     return {
         token,
         user: toPublicUser(user),

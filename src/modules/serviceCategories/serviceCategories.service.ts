@@ -40,6 +40,17 @@ export async function ensureServiceCategoryCatalogSeeded(): Promise<void> {
       { upsert: true, returnDocument: "after" }
     );
   }
+
+  const allowedSlugs = SERVICE_CATEGORY_CATALOG.map((c) => c.slug);
+  const pruneResult = await ServiceCategory.deleteMany({
+    slug: { $nin: allowedSlugs },
+  });
+  if (pruneResult.deletedCount > 0) {
+    logger.info("Removed obsolete service categories not in catalog", {
+      deletedCount: pruneResult.deletedCount,
+    });
+  }
+
   logger.info("Service category catalog seeded", {
     count: SERVICE_CATEGORY_CATALOG.length,
   });

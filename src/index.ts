@@ -1,5 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
+import { initCloudinary } from "./config/cloudinary";
 import { connectDatabase } from "./config/database";
 import { ensureServiceCategoryCatalogSeeded } from "./modules/serviceCategories/serviceCategories.service";
 import { setupRoutes } from "./routes/api";
@@ -23,6 +24,7 @@ const PORT = process.env.PORT || 3002;
 
 const startServer = async () => {
   try {
+    initCloudinary();
     await connectDatabase();
     await ensureServiceCategoryCatalogSeeded();
     app.listen(PORT, () => {

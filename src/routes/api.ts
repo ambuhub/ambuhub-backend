@@ -1,6 +1,8 @@
 import type { Application } from "express";
 import authRoutes from "../modules/auth/auth.routes";
 import serviceCategoriesRoutes from "../modules/serviceCategories/serviceCategories.routes";
+import servicesRoutes from "../modules/services/services.routes";
+import uploadsRoutes from "../modules/uploads/uploads.routes";
 
 export const setupRoutes = (app: Application): void => {
   app.get("/health", (_req, res) => {
@@ -9,4 +11,6 @@ export const setupRoutes = (app: Application): void => {
 
   app.use("/api/auth", authRoutes);
   app.use("/api/service-categories", serviceCategoriesRoutes);
+  app.use("/api/services", servicesRoutes);
+  app.use("/api/uploads", uploadsRoutes);
 };

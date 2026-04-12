@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const dotenv_1 = __importDefault(require("dotenv"));
+const cloudinary_1 = require("./config/cloudinary");
 const database_1 = require("./config/database");
 const serviceCategories_service_1 = require("./modules/serviceCategories/serviceCategories.service");
 const api_1 = require("./routes/api");
@@ -21,6 +22,7 @@ const PORT = process.env.PORT || 3002;
 // Connect to database and start server
 const startServer = async () => {
     try {
+        (0, cloudinary_1.initCloudinary)();
         await (0, database_1.connectDatabase)();
         await (0, serviceCategories_service_1.ensureServiceCategoryCatalogSeeded)();
         app.listen(PORT, () => {

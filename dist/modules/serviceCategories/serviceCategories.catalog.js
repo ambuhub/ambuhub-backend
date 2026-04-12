@@ -2,13 +2,14 @@
 /**
  * Canonical service category catalog (source of truth for seeding).
  * Department slugs are stable API identifiers within each category.
+ * Slugs align with the provider UI (medical-transport, personnel, ambulance-servicing).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SERVICE_CATEGORY_CATALOG = void 0;
 exports.SERVICE_CATEGORY_CATALOG = [
     {
-        name: "Emergency Medical Transport",
-        slug: "emergency-medical-transport",
+        name: "Medical transport",
+        slug: "medical-transport",
         departments: [
             { name: "Ground Ambulance", slug: "ground-ambulance" },
             { name: "Air Ambulance", slug: "air-ambulance" },
@@ -21,20 +22,7 @@ exports.SERVICE_CATEGORY_CATALOG = [
         ],
     },
     {
-        name: "Non Emergency Medical Transport",
-        slug: "non-emergency-medical-transport",
-        departments: [
-            { name: "Ground Ambulance", slug: "ground-ambulance" },
-            { name: "Air Ambulance", slug: "air-ambulance" },
-            {
-                name: "Cargo for Remains (Local and international)",
-                slug: "cargo-for-remains-local-and-international",
-            },
-            { name: "Hearse for remains", slug: "hearse-for-remains" },
-        ],
-    },
-    {
-        name: "Personnel",
+        name: "Ambulance personnel",
         slug: "personnel",
         departments: [
             { name: "Ambulance Driver", slug: "ambulance-driver" },
@@ -43,8 +31,8 @@ exports.SERVICE_CATEGORY_CATALOG = [
                 slug: "basic-emergency-medical-technician",
             },
             {
-                name: "Paramedic Air/Ground Ambulance",
-                slug: "paramedic-air-ground-ambulance",
+                name: "Paramedic (Air/Ground Ambulance)",
+                slug: "ambulance-paramedic",
             },
             { name: "Ambulance Nurse", slug: "ambulance-nurse" },
             { name: "Ambulance Doctor", slug: "ambulance-doctor" },
@@ -53,7 +41,7 @@ exports.SERVICE_CATEGORY_CATALOG = [
         ],
     },
     {
-        name: "Ambulance Servicing",
+        name: "Ambulance servicing",
         slug: "ambulance-servicing",
         departments: [
             { name: "Ambulance Sales", slug: "ambulance-sales" },

@@ -53,9 +53,9 @@ export async function scheduleEmailVerificationOtp(
   });
 }
 
-function signToken(userId: string, email: string, role: UserRole): string {
+function signToken(userId: string, role: UserRole): string {
   return jwt.sign(
-    { sub: userId, email, role },
+    { sub: userId, userId, role },
     requireEnvJwtSecret(),
     { expiresIn: JWT_EXPIRES }
   );
@@ -119,7 +119,7 @@ export async function register(
 
   await scheduleEmailVerificationOtp(user._id.toString(), user.email);
 
-  const token = signToken(user._id.toString(), user.email, user.role);
+  const token = signToken(user._id.toString(), user.role);
 
   return {
     token,
@@ -148,7 +148,7 @@ export async function login(
     throw new AuthHttpError(401, "Invalid email or password");
   }
 
-  const token = signToken(user._id.toString(), user.email, user.role);
+  const token = signToken(user._id.toString(), user.role);
 
   return {
     token,
