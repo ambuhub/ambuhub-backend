@@ -4,5 +4,7 @@ const express_1 = require("express");
 const serviceCategories_controller_1 = require("./serviceCategories.controller");
 const router = (0, express_1.Router)();
 router.get("/", serviceCategories_controller_1.listServiceCategoriesHandler);
+router.post("/", serviceCategories_controller_1.postCreateServiceCategoryHandler);
+router.put("/:slug", serviceCategories_controller_1.putServiceCategoryBySlugHandler);
 router.get("/:slug", serviceCategories_controller_1.getServiceCategoryBySlugHandler);
 exports.default = router;

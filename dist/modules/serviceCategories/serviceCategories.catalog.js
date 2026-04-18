@@ -2,7 +2,7 @@
 /**
  * Canonical service category catalog (source of truth for seeding).
  * Department slugs are stable API identifiers within each category.
- * Slugs align with the provider UI (medical-transport, personnel, ambulance-servicing).
+ * Slugs align with the provider UI (medical-transport, personnel, ambulance-servicing, ambulance-equipment).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SERVICE_CATEGORY_CATALOG = void 0;
@@ -46,7 +46,14 @@ exports.SERVICE_CATEGORY_CATALOG = [
         departments: [
             { name: "Ambulance Sales", slug: "ambulance-sales" },
             { name: "Ambulance Maintenance", slug: "ambulance-maintenance" },
-            { name: "Ambulance equipment", slug: "ambulance-equipment" },
+        ],
+    },
+    {
+        name: "Ambulance equipment",
+        slug: "ambulance-equipment",
+        departments: [
+            { name: "New equipment", slug: "new-equipment" },
+            { name: "Used equipment", slug: "used-equipment" },
         ],
     },
 ];
