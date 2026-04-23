@@ -7,12 +7,29 @@ import {
 } from "./services.service";
 
 export async function getMarketplaceServices(
-  _req: Request,
+  req: Request,
   res: Response
 ): Promise<void> {
   try {
-    const services = await listMarketplaceServices();
-    res.status(200).json({ services });
+    const raw = req.query.categorySlug;
+    const categorySlug =
+      raw === undefined
+        ? undefined
+        : Array.isArray(raw)
+          ? typeof raw[0] === "string"
+            ? raw[0]
+            : null
+          : typeof raw === "string"
+            ? raw
+            : null;
+
+    if (categorySlug === null) {
+      res.status(400).json({ message: "categorySlug must be a string" });
+      return;
+    }
+
+    const { services, bannerUrl } = await listMarketplaceServices(categorySlug);
+    res.status(200).json({ services, bannerUrl });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
       res.status(err.statusCode).json({ message: err.message });

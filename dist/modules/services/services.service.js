@@ -51,13 +51,34 @@ function mapLeanServiceToDto(doc) {
     };
 }
 const MARKETPLACE_LISTING_CAP = 200;
-async function listMarketplaceServices() {
-    const rows = await service_model_1.Service.find({})
+async function listMarketplaceServices(categorySlug) {
+    let query = {};
+    let bannerUrl = null;
+    if (categorySlug !== undefined) {
+        const trimmed = categorySlug.trim();
+        if (!trimmed) {
+            throw new ServicesHttpError(400, "categorySlug must be a non-empty string");
+        }
+        const category = await serviceCategory_model_1.ServiceCategory.findOne({ slug: trimmed }, "_id bannerUrl").lean();
+        if (!category) {
+            throw new ServicesHttpError(404, "Service category not found");
+        }
+        const rawBanner = category.bannerUrl;
+        bannerUrl =
+            typeof rawBanner === "string" && rawBanner.trim() !== ""
+                ? rawBanner.trim()
+                : null;
+        query = { serviceCategoryId: category._id };
+    }
+    const rows = await service_model_1.Service.find(query)
         .populate("serviceCategoryId", "name slug departments")
         .sort({ createdAt: -1 })
         .limit(MARKETPLACE_LISTING_CAP)
         .lean();
-    return rows.map((doc) => mapLeanServiceToDto(doc));
+    return {
+        services: rows.map((doc) => mapLeanServiceToDto(doc)),
+        bannerUrl,
+    };
 }
 async function listMyServices(userId) {
     const rows = await service_model_1.Service.find({

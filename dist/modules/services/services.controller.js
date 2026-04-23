@@ -4,10 +4,24 @@ exports.getMarketplaceServices = getMarketplaceServices;
 exports.getMyServices = getMyServices;
 exports.postCreateService = postCreateService;
 const services_service_1 = require("./services.service");
-async function getMarketplaceServices(_req, res) {
+async function getMarketplaceServices(req, res) {
     try {
-        const services = await (0, services_service_1.listMarketplaceServices)();
-        res.status(200).json({ services });
+        const raw = req.query.categorySlug;
+        const categorySlug = raw === undefined
+            ? undefined
+            : Array.isArray(raw)
+                ? typeof raw[0] === "string"
+                    ? raw[0]
+                    : null
+                : typeof raw === "string"
+                    ? raw
+                    : null;
+        if (categorySlug === null) {
+            res.status(400).json({ message: "categorySlug must be a string" });
+            return;
+        }
+        const { services, bannerUrl } = await (0, services_service_1.listMarketplaceServices)(categorySlug);
+        res.status(200).json({ services, bannerUrl });
     }
     catch (err) {
         if (err instanceof services_service_1.ServicesHttpError) {

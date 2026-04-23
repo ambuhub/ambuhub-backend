@@ -82,10 +82,38 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
 
 const MARKETPLACE_LISTING_CAP = 200;
 
-export async function listMarketplaceServices(): Promise<
-  MarketplaceServiceDto[]
-> {
-  const rows = await Service.find({})
+export type MarketplaceServicesResult = {
+  services: MarketplaceServiceDto[];
+  bannerUrl: string | null;
+};
+
+export async function listMarketplaceServices(
+  categorySlug?: string
+): Promise<MarketplaceServicesResult> {
+  let query: Record<string, unknown> = {};
+  let bannerUrl: string | null = null;
+
+  if (categorySlug !== undefined) {
+    const trimmed = categorySlug.trim();
+    if (!trimmed) {
+      throw new ServicesHttpError(400, "categorySlug must be a non-empty string");
+    }
+    const category = await ServiceCategory.findOne(
+      { slug: trimmed },
+      "_id bannerUrl"
+    ).lean();
+    if (!category) {
+      throw new ServicesHttpError(404, "Service category not found");
+    }
+    const rawBanner = (category as { bannerUrl?: unknown }).bannerUrl;
+    bannerUrl =
+      typeof rawBanner === "string" && rawBanner.trim() !== ""
+        ? rawBanner.trim()
+        : null;
+    query = { serviceCategoryId: category._id };
+  }
+
+  const rows = await Service.find(query)
     .populate<{ serviceCategoryId: PopulatedCategory | null }>(
       "serviceCategoryId",
       "name slug departments"
@@ -94,7 +122,10 @@ export async function listMarketplaceServices(): Promise<
     .limit(MARKETPLACE_LISTING_CAP)
     .lean();
 
-  return rows.map((doc) => mapLeanServiceToDto(doc as LeanPopulatedService));
+  return {
+    services: rows.map((doc) => mapLeanServiceToDto(doc as LeanPopulatedService)),
+    bannerUrl,
+  };
 }
 
 export async function listMyServices(userId: string): Promise<MyServiceDto[]> {
