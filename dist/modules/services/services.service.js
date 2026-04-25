@@ -10,6 +10,12 @@ exports.createService = createService;
 const mongoose_1 = __importDefault(require("mongoose"));
 const service_model_1 = require("../../models/service.model");
 const serviceCategory_model_1 = require("../../models/serviceCategory.model");
+const PERSONNEL_CATEGORY_SLUG = "personnel";
+const AMBULANCE_SERVICING_CATEGORY_SLUG = "ambulance-servicing";
+const NULL_LISTING_TYPE_CATEGORY_SLUGS = new Set([
+    PERSONNEL_CATEGORY_SLUG,
+    AMBULANCE_SERVICING_CATEGORY_SLUG,
+]);
 class ServicesHttpError extends Error {
     constructor(statusCode, message) {
         super(message);
@@ -42,6 +48,7 @@ function mapLeanServiceToDto(doc) {
         id: doc._id.toString(),
         title: doc.title,
         description: doc.description,
+        listingType: doc.listingType ?? null,
         departmentSlug: doc.departmentSlug,
         departmentName,
         category,
@@ -90,7 +97,7 @@ async function listMyServices(userId) {
     return rows.map((doc) => mapLeanServiceToDto(doc));
 }
 async function createService(userId, input) {
-    const { title, description, serviceCategorySlug, departmentSlug, photoUrls = [], } = input;
+    const { title, description, serviceCategorySlug, departmentSlug, listingType, photoUrls = [], } = input;
     if (!title?.trim() ||
         !description?.trim() ||
         !serviceCategorySlug?.trim() ||
@@ -107,6 +114,29 @@ async function createService(userId, input) {
     if (!deptSlugs.includes(departmentSlug.trim())) {
         throw new ServicesHttpError(400, "departmentSlug is not valid for this category");
     }
+    const normalizedListingType = (() => {
+        if (listingType === null || listingType === undefined) {
+            return null;
+        }
+        if (typeof listingType !== "string") {
+            throw new ServicesHttpError(400, "listingType must be 'sale' or 'rent' for non-personnel categories");
+        }
+        const trimmed = listingType.trim();
+        if (trimmed === "") {
+            return null;
+        }
+        if (trimmed === "sale" || trimmed === "rent") {
+            return trimmed;
+        }
+        throw new ServicesHttpError(400, "listingType must be 'sale' or 'rent' for non-personnel categories");
+    })();
+    const mustUseNullListingType = NULL_LISTING_TYPE_CATEGORY_SLUGS.has(category.slug);
+    if (mustUseNullListingType && normalizedListingType !== null) {
+        throw new ServicesHttpError(400, "listingType must be null for personnel and ambulance-servicing categories");
+    }
+    if (!mustUseNullListingType && normalizedListingType === null) {
+        throw new ServicesHttpError(400, "listingType is required and must be 'sale' or 'rent' for this category");
+    }
     const normalizedUrls = Array.isArray(photoUrls)
         ? photoUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
         : [];
@@ -115,6 +145,7 @@ async function createService(userId, input) {
         description: description.trim(),
         userId: new mongoose_1.default.Types.ObjectId(userId),
         serviceCategoryId: category._id,
+        listingType: normalizedListingType,
         departmentSlug: departmentSlug.trim(),
         photoUrls: normalizedUrls,
     });

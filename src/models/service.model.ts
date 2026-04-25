@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+const listingTypeValues = ["sale", "rent"] as const;
+
 const serviceSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
@@ -14,6 +16,11 @@ const serviceSchema = new mongoose.Schema(
       ref: "ServiceCategory",
       required: true,
       index: true,
+    },
+    listingType: {
+      type: String,
+      enum: listingTypeValues,
+      default: null,
     },
     departmentSlug: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },

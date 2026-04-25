@@ -74,12 +74,20 @@ export async function postCreateService(
     const photoUrls = Array.isArray(body.photoUrls)
       ? (body.photoUrls as unknown[]).map((u) => String(u))
       : undefined;
+    const listingTypeRaw = body.listingType;
+    const listingType =
+      listingTypeRaw === null || listingTypeRaw === undefined
+        ? null
+        : typeof listingTypeRaw === "string"
+          ? listingTypeRaw
+          : undefined;
 
     const service = await createService(req.auth.userId, {
       title: String(body.title ?? ""),
       description: String(body.description ?? ""),
       serviceCategorySlug: String(body.serviceCategorySlug ?? ""),
       departmentSlug: String(body.departmentSlug ?? ""),
+      listingType,
       photoUrls,
     });
 

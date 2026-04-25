@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Service = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
+const listingTypeValues = ["sale", "rent"];
 const serviceSchema = new mongoose_1.default.Schema({
     title: { type: String, required: true, trim: true },
     userId: {
@@ -18,6 +19,11 @@ const serviceSchema = new mongoose_1.default.Schema({
         ref: "ServiceCategory",
         required: true,
         index: true,
+    },
+    listingType: {
+        type: String,
+        enum: listingTypeValues,
+        default: null,
     },
     departmentSlug: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },

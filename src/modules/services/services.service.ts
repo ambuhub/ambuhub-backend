@@ -2,6 +2,14 @@ import mongoose from "mongoose";
 import { Service } from "../../models/service.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
 
+export type ListingType = "sale" | "rent";
+const PERSONNEL_CATEGORY_SLUG = "personnel";
+const AMBULANCE_SERVICING_CATEGORY_SLUG = "ambulance-servicing";
+const NULL_LISTING_TYPE_CATEGORY_SLUGS = new Set([
+  PERSONNEL_CATEGORY_SLUG,
+  AMBULANCE_SERVICING_CATEGORY_SLUG,
+]);
+
 export class ServicesHttpError extends Error {
   constructor(
     public statusCode: number,
@@ -16,6 +24,7 @@ export interface MyServiceDto {
   id: string;
   title: string;
   description: string;
+  listingType: ListingType | null;
   departmentSlug: string;
   departmentName: string;
   category: { id: string; slug: string; name: string };
@@ -38,6 +47,7 @@ type LeanPopulatedService = {
   _id: mongoose.Types.ObjectId;
   title: string;
   description: string;
+  listingType?: ListingType | null;
   departmentSlug: string;
   photoUrls: unknown;
   createdAt: Date;
@@ -71,6 +81,7 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     id: doc._id.toString(),
     title: doc.title,
     description: doc.description,
+    listingType: doc.listingType ?? null,
     departmentSlug: doc.departmentSlug,
     departmentName,
     category,
@@ -147,6 +158,7 @@ export interface CreateServiceInput {
   description: string;
   serviceCategorySlug: string;
   departmentSlug: string;
+  listingType?: string | null;
   photoUrls?: string[];
 }
 
@@ -159,6 +171,7 @@ export async function createService(
     description,
     serviceCategorySlug,
     departmentSlug,
+    listingType,
     photoUrls = [],
   } = input;
 
@@ -190,6 +203,45 @@ export async function createService(
     );
   }
 
+  const normalizedListingType = (() => {
+    if (listingType === null || listingType === undefined) {
+      return null;
+    }
+    if (typeof listingType !== "string") {
+      throw new ServicesHttpError(
+        400,
+        "listingType must be 'sale' or 'rent' for non-personnel categories"
+      );
+    }
+    const trimmed = listingType.trim();
+    if (trimmed === "") {
+      return null;
+    }
+    if (trimmed === "sale" || trimmed === "rent") {
+      return trimmed;
+    }
+    throw new ServicesHttpError(
+      400,
+      "listingType must be 'sale' or 'rent' for non-personnel categories"
+    );
+  })();
+
+  const mustUseNullListingType = NULL_LISTING_TYPE_CATEGORY_SLUGS.has(category.slug);
+
+  if (mustUseNullListingType && normalizedListingType !== null) {
+    throw new ServicesHttpError(
+      400,
+      "listingType must be null for personnel and ambulance-servicing categories"
+    );
+  }
+
+  if (!mustUseNullListingType && normalizedListingType === null) {
+    throw new ServicesHttpError(
+      400,
+      "listingType is required and must be 'sale' or 'rent' for this category"
+    );
+  }
+
   const normalizedUrls = Array.isArray(photoUrls)
     ? photoUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
     : [];
@@ -199,6 +251,7 @@ export async function createService(
     description: description.trim(),
     userId: new mongoose.Types.ObjectId(userId),
     serviceCategoryId: category._id,
+    listingType: normalizedListingType,
     departmentSlug: departmentSlug.trim(),
     photoUrls: normalizedUrls,
   });
