@@ -25,6 +25,7 @@ export interface MyServiceDto {
   title: string;
   description: string;
   listingType: ListingType | null;
+  stock: number | null;
   departmentSlug: string;
   departmentName: string;
   category: { id: string; slug: string; name: string };
@@ -48,6 +49,7 @@ type LeanPopulatedService = {
   title: string;
   description: string;
   listingType?: ListingType | null;
+  stock?: number | null;
   departmentSlug: string;
   photoUrls: unknown;
   createdAt: Date;
@@ -82,6 +84,7 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     title: doc.title,
     description: doc.description,
     listingType: doc.listingType ?? null,
+    stock: typeof doc.stock === "number" ? doc.stock : null,
     departmentSlug: doc.departmentSlug,
     departmentName,
     category,
@@ -159,6 +162,7 @@ export interface CreateServiceInput {
   serviceCategorySlug: string;
   departmentSlug: string;
   listingType?: string | null;
+  stock?: number | null;
   photoUrls?: string[];
 }
 
@@ -172,6 +176,7 @@ export async function createService(
     serviceCategorySlug,
     departmentSlug,
     listingType,
+    stock,
     photoUrls = [],
   } = input;
 
@@ -242,6 +247,36 @@ export async function createService(
     );
   }
 
+  const normalizedStock = (() => {
+    if (stock === null || stock === undefined) {
+      return null;
+    }
+    if (typeof stock !== "number" || !Number.isFinite(stock)) {
+      throw new ServicesHttpError(400, "stock must be a number");
+    }
+    if (!Number.isInteger(stock) || stock < 0) {
+      throw new ServicesHttpError(
+        400,
+        "stock must be a non-negative integer"
+      );
+    }
+    return stock;
+  })();
+
+  if (normalizedListingType === "sale" && normalizedStock === null) {
+    throw new ServicesHttpError(
+      400,
+      "stock is required when listingType is 'sale'"
+    );
+  }
+
+  if (normalizedListingType !== "sale" && normalizedStock !== null) {
+    throw new ServicesHttpError(
+      400,
+      "stock must be null unless listingType is 'sale'"
+    );
+  }
+
   const normalizedUrls = Array.isArray(photoUrls)
     ? photoUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
     : [];
@@ -252,6 +287,7 @@ export async function createService(
     userId: new mongoose.Types.ObjectId(userId),
     serviceCategoryId: category._id,
     listingType: normalizedListingType,
+    stock: normalizedStock,
     departmentSlug: departmentSlug.trim(),
     photoUrls: normalizedUrls,
   });

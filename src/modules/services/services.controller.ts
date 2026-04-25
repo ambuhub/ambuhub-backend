@@ -81,6 +81,15 @@ export async function postCreateService(
         : typeof listingTypeRaw === "string"
           ? listingTypeRaw
           : undefined;
+    const stockRaw = body.stock;
+    const stock =
+      stockRaw === null || stockRaw === undefined
+        ? null
+        : typeof stockRaw === "number"
+          ? stockRaw
+          : typeof stockRaw === "string"
+            ? Number(stockRaw)
+            : undefined;
 
     const service = await createService(req.auth.userId, {
       title: String(body.title ?? ""),
@@ -88,6 +97,7 @@ export async function postCreateService(
       serviceCategorySlug: String(body.serviceCategorySlug ?? ""),
       departmentSlug: String(body.departmentSlug ?? ""),
       listingType,
+      stock,
       photoUrls,
     });
 

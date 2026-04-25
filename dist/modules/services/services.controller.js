@@ -64,12 +64,21 @@ async function postCreateService(req, res) {
             : typeof listingTypeRaw === "string"
                 ? listingTypeRaw
                 : undefined;
+        const stockRaw = body.stock;
+        const stock = stockRaw === null || stockRaw === undefined
+            ? null
+            : typeof stockRaw === "number"
+                ? stockRaw
+                : typeof stockRaw === "string"
+                    ? Number(stockRaw)
+                    : undefined;
         const service = await (0, services_service_1.createService)(req.auth.userId, {
             title: String(body.title ?? ""),
             description: String(body.description ?? ""),
             serviceCategorySlug: String(body.serviceCategorySlug ?? ""),
             departmentSlug: String(body.departmentSlug ?? ""),
             listingType,
+            stock,
             photoUrls,
         });
         res.status(201).json({ service });

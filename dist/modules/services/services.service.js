@@ -49,6 +49,7 @@ function mapLeanServiceToDto(doc) {
         title: doc.title,
         description: doc.description,
         listingType: doc.listingType ?? null,
+        stock: typeof doc.stock === "number" ? doc.stock : null,
         departmentSlug: doc.departmentSlug,
         departmentName,
         category,
@@ -97,7 +98,7 @@ async function listMyServices(userId) {
     return rows.map((doc) => mapLeanServiceToDto(doc));
 }
 async function createService(userId, input) {
-    const { title, description, serviceCategorySlug, departmentSlug, listingType, photoUrls = [], } = input;
+    const { title, description, serviceCategorySlug, departmentSlug, listingType, stock, photoUrls = [], } = input;
     if (!title?.trim() ||
         !description?.trim() ||
         !serviceCategorySlug?.trim() ||
@@ -137,6 +138,24 @@ async function createService(userId, input) {
     if (!mustUseNullListingType && normalizedListingType === null) {
         throw new ServicesHttpError(400, "listingType is required and must be 'sale' or 'rent' for this category");
     }
+    const normalizedStock = (() => {
+        if (stock === null || stock === undefined) {
+            return null;
+        }
+        if (typeof stock !== "number" || !Number.isFinite(stock)) {
+            throw new ServicesHttpError(400, "stock must be a number");
+        }
+        if (!Number.isInteger(stock) || stock < 0) {
+            throw new ServicesHttpError(400, "stock must be a non-negative integer");
+        }
+        return stock;
+    })();
+    if (normalizedListingType === "sale" && normalizedStock === null) {
+        throw new ServicesHttpError(400, "stock is required when listingType is 'sale'");
+    }
+    if (normalizedListingType !== "sale" && normalizedStock !== null) {
+        throw new ServicesHttpError(400, "stock must be null unless listingType is 'sale'");
+    }
     const normalizedUrls = Array.isArray(photoUrls)
         ? photoUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
         : [];
@@ -146,6 +165,7 @@ async function createService(userId, input) {
         userId: new mongoose_1.default.Types.ObjectId(userId),
         serviceCategoryId: category._id,
         listingType: normalizedListingType,
+        stock: normalizedStock,
         departmentSlug: departmentSlug.trim(),
         photoUrls: normalizedUrls,
     });

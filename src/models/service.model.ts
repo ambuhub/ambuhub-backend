@@ -22,6 +22,11 @@ const serviceSchema = new mongoose.Schema(
       enum: listingTypeValues,
       default: null,
     },
+    stock: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
     departmentSlug: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
     photoUrls: { type: [String], default: [] },
