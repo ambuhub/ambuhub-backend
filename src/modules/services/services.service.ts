@@ -26,6 +26,7 @@ export interface MyServiceDto {
   description: string;
   listingType: ListingType | null;
   stock: number | null;
+  price: number | null;
   departmentSlug: string;
   departmentName: string;
   category: { id: string; slug: string; name: string };
@@ -50,6 +51,7 @@ type LeanPopulatedService = {
   description: string;
   listingType?: ListingType | null;
   stock?: number | null;
+  price?: number | null;
   departmentSlug: string;
   photoUrls: unknown;
   createdAt: Date;
@@ -85,6 +87,7 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     description: doc.description,
     listingType: doc.listingType ?? null,
     stock: typeof doc.stock === "number" ? doc.stock : null,
+    price: typeof doc.price === "number" ? doc.price : null,
     departmentSlug: doc.departmentSlug,
     departmentName,
     category,
@@ -163,48 +166,40 @@ export interface CreateServiceInput {
   departmentSlug: string;
   listingType?: string | null;
   stock?: number | null;
+  price?: number | null;
   photoUrls?: string[];
 }
 
-export async function createService(
-  userId: string,
+function normalizeAndValidateServiceInput(
+  categorySlug: string,
   input: CreateServiceInput
-) {
+): {
+  title: string;
+  description: string;
+  departmentSlug: string;
+  listingType: ListingType | null;
+  stock: number | null;
+  price: number | null;
+  photoUrls: string[];
+} {
   const {
     title,
     description,
-    serviceCategorySlug,
     departmentSlug,
     listingType,
     stock,
+    price,
     photoUrls = [],
   } = input;
 
   if (
     !title?.trim() ||
     !description?.trim() ||
-    !serviceCategorySlug?.trim() ||
     !departmentSlug?.trim()
   ) {
     throw new ServicesHttpError(
       400,
-      "title, description, serviceCategorySlug, and departmentSlug are required"
-    );
-  }
-
-  const category = await ServiceCategory.findOne({
-    slug: serviceCategorySlug.trim(),
-  }).lean();
-
-  if (!category) {
-    throw new ServicesHttpError(404, "Service category not found");
-  }
-
-  const deptSlugs = category.departments.map((d) => d.slug);
-  if (!deptSlugs.includes(departmentSlug.trim())) {
-    throw new ServicesHttpError(
-      400,
-      "departmentSlug is not valid for this category"
+      "title, description, and departmentSlug are required"
     );
   }
 
@@ -231,7 +226,7 @@ export async function createService(
     );
   })();
 
-  const mustUseNullListingType = NULL_LISTING_TYPE_CATEGORY_SLUGS.has(category.slug);
+  const mustUseNullListingType = NULL_LISTING_TYPE_CATEGORY_SLUGS.has(categorySlug);
 
   if (mustUseNullListingType && normalizedListingType !== null) {
     throw new ServicesHttpError(
@@ -277,20 +272,151 @@ export async function createService(
     );
   }
 
+  const normalizedPrice = (() => {
+    if (price === null || price === undefined) {
+      return null;
+    }
+    if (typeof price !== "number" || !Number.isFinite(price)) {
+      throw new ServicesHttpError(400, "price must be a number");
+    }
+    if (price < 0) {
+      throw new ServicesHttpError(400, "price must be a non-negative number");
+    }
+    return price;
+  })();
+
+  if (normalizedListingType === "sale" && normalizedPrice === null) {
+    throw new ServicesHttpError(
+      400,
+      "price is required when listingType is 'sale'"
+    );
+  }
+
+  if (normalizedListingType !== "sale" && normalizedPrice !== null) {
+    throw new ServicesHttpError(
+      400,
+      "price must be null unless listingType is 'sale'"
+    );
+  }
+
   const normalizedUrls = Array.isArray(photoUrls)
     ? photoUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
     : [];
 
-  const doc = await Service.create({
+  return {
     title: title.trim(),
     description: description.trim(),
-    userId: new mongoose.Types.ObjectId(userId),
-    serviceCategoryId: category._id,
+    departmentSlug: departmentSlug.trim(),
     listingType: normalizedListingType,
     stock: normalizedStock,
-    departmentSlug: departmentSlug.trim(),
+    price: normalizedPrice,
     photoUrls: normalizedUrls,
+  };
+}
+
+export async function createService(
+  userId: string,
+  input: CreateServiceInput
+) {
+  if (!input.serviceCategorySlug?.trim()) {
+    throw new ServicesHttpError(400, "serviceCategorySlug is required");
+  }
+
+  const category = await ServiceCategory.findOne({
+    slug: input.serviceCategorySlug.trim(),
+  }).lean();
+
+  if (!category) {
+    throw new ServicesHttpError(404, "Service category not found");
+  }
+
+  const deptSlugs = category.departments.map((d) => d.slug);
+  const normalized = normalizeAndValidateServiceInput(category.slug, input);
+  if (!deptSlugs.includes(normalized.departmentSlug)) {
+    throw new ServicesHttpError(
+      400,
+      "departmentSlug is not valid for this category"
+    );
+  }
+
+  const doc = await Service.create({
+    title: normalized.title,
+    description: normalized.description,
+    userId: new mongoose.Types.ObjectId(userId),
+    serviceCategoryId: category._id,
+    listingType: normalized.listingType,
+    stock: normalized.stock,
+    price: normalized.price,
+    departmentSlug: normalized.departmentSlug,
+    photoUrls: normalized.photoUrls,
   });
 
   return doc.toObject();
+}
+
+export interface UpdateServiceInput extends CreateServiceInput {
+  serviceId: string;
+}
+
+export async function updateService(
+  userId: string,
+  input: UpdateServiceInput
+) {
+  if (!input.serviceId?.trim()) {
+    throw new ServicesHttpError(400, "serviceId is required");
+  }
+  if (!mongoose.Types.ObjectId.isValid(input.serviceId.trim())) {
+    throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+  }
+  if (!input.serviceCategorySlug?.trim()) {
+    throw new ServicesHttpError(400, "serviceCategorySlug is required");
+  }
+
+  const service = await Service.findById(input.serviceId.trim()).lean();
+  if (!service) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+  if (service.userId.toString() !== userId) {
+    throw new ServicesHttpError(
+      403,
+      "You can only update services you created"
+    );
+  }
+
+  const category = await ServiceCategory.findOne({
+    slug: input.serviceCategorySlug.trim(),
+  }).lean();
+  if (!category) {
+    throw new ServicesHttpError(404, "Service category not found");
+  }
+
+  const normalized = normalizeAndValidateServiceInput(category.slug, input);
+  const deptSlugs = category.departments.map((d) => d.slug);
+  if (!deptSlugs.includes(normalized.departmentSlug)) {
+    throw new ServicesHttpError(
+      400,
+      "departmentSlug is not valid for this category"
+    );
+  }
+
+  const updated = await Service.findByIdAndUpdate(
+    service._id,
+    {
+      title: normalized.title,
+      description: normalized.description,
+      serviceCategoryId: category._id,
+      departmentSlug: normalized.departmentSlug,
+      listingType: normalized.listingType,
+      stock: normalized.stock,
+      price: normalized.price,
+      photoUrls: normalized.photoUrls,
+    },
+    { new: true }
+  ).lean();
+
+  if (!updated) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+
+  return updated;
 }

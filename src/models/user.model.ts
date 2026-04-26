@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-export type UserRole = "patient" | "service_provider";
+export type UserRole = "client" | "service_provider";
 
 const userSchema = new mongoose.Schema(
   {
@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: {
       type: String,
-      enum: ["patient", "service_provider"],
+      enum: ["client", "service_provider"],
       required: true,
     },
     emailVerified: { type: Boolean, default: false },

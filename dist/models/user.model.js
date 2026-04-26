@@ -19,7 +19,7 @@ const userSchema = new mongoose_1.default.Schema({
     password: { type: String, required: true, select: false },
     role: {
         type: String,
-        enum: ["patient", "service_provider"],
+        enum: ["client", "service_provider"],
         required: true,
     },
     emailVerified: { type: Boolean, default: false },

@@ -88,7 +88,7 @@ export async function register(
   if (!password || password.length < 8) {
     throw new AuthHttpError(400, "Password must be at least 8 characters");
   }
-  if (role !== "patient" && role !== "service_provider") {
+  if (role !== "client" && role !== "service_provider") {
     throw new AuthHttpError(400, "Invalid role");
   }
 
