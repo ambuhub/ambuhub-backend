@@ -159,6 +159,47 @@ export async function listMyServices(userId: string): Promise<MyServiceDto[]> {
   return rows.map((doc) => mapLeanServiceToDto(doc as LeanPopulatedService));
 }
 
+export async function getMyServiceById(
+  userId: string,
+  serviceId: string
+): Promise<MyServiceDto> {
+  const trimmed = serviceId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+  }
+  const doc = await Service.findOne({
+    _id: new mongoose.Types.ObjectId(trimmed),
+    userId: new mongoose.Types.ObjectId(userId),
+  })
+    .populate<{ serviceCategoryId: PopulatedCategory | null }>(
+      "serviceCategoryId",
+      "name slug departments"
+    )
+    .lean();
+
+  if (!doc) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+  return mapLeanServiceToDto(doc as LeanPopulatedService);
+}
+
+export async function deleteService(
+  userId: string,
+  serviceId: string
+): Promise<void> {
+  const trimmed = serviceId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+  }
+  const result = await Service.findOneAndDelete({
+    _id: new mongoose.Types.ObjectId(trimmed),
+    userId: new mongoose.Types.ObjectId(userId),
+  });
+  if (!result) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+}
+
 export interface CreateServiceInput {
   title: string;
   description: string;
@@ -361,7 +402,7 @@ export interface UpdateServiceInput extends CreateServiceInput {
 export async function updateService(
   userId: string,
   input: UpdateServiceInput
-) {
+): Promise<MyServiceDto> {
   if (!input.serviceId?.trim()) {
     throw new ServicesHttpError(400, "serviceId is required");
   }
@@ -418,5 +459,16 @@ export async function updateService(
     throw new ServicesHttpError(404, "Service not found");
   }
 
-  return updated;
+  const repopulated = await Service.findById(updated._id)
+    .populate<{ serviceCategoryId: PopulatedCategory | null }>(
+      "serviceCategoryId",
+      "name slug departments"
+    )
+    .lean();
+
+  if (!repopulated) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+
+  return mapLeanServiceToDto(repopulated as LeanPopulatedService);
 }

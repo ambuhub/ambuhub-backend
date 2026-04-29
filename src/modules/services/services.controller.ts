@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import {
   createService,
+  deleteService,
+  getMyServiceById,
   listMarketplaceServices,
   listMyServices,
   ServicesHttpError,
@@ -105,6 +107,52 @@ export async function getMyServices(
 
     const services = await listMyServices(req.auth.userId);
     res.status(200).json({ services });
+  } catch (err: unknown) {
+    if (err instanceof ServicesHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getMyServiceByIdHandler(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const rawId = req.params.serviceId;
+    const serviceId = typeof rawId === "string" ? rawId : "";
+    const service = await getMyServiceById(req.auth.userId, serviceId);
+    res.status(200).json({ service });
+  } catch (err: unknown) {
+    if (err instanceof ServicesHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function deleteMyService(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const rawId = req.params.id;
+    const serviceId = typeof rawId === "string" ? rawId : "";
+    await deleteService(req.auth.userId, serviceId);
+    res.status(204).send();
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
       res.status(err.statusCode).json({ message: err.message });

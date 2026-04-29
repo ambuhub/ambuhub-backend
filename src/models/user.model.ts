@@ -4,7 +4,8 @@ export type UserRole = "client" | "service_provider";
 
 const userSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true },
+    firstName: { type: String, required: true, trim: true },
+    lastName: { type: String, required: true, trim: true },
     email: {
       type: String,
       required: true,
@@ -21,6 +22,8 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
     emailVerified: { type: Boolean, default: false },
+    /** Set for clients; null for service providers and legacy users */
+    dateOfBirth: { type: Date, default: null },
   },
   { timestamps: true }
 );

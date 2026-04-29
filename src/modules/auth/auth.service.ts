@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { User, type UserRole } from "../../models/user.model";
+import { ServiceProvider } from "../../models/serviceProvider.model";
 import { logger } from "../../shared/lib/logger";
 
 const SALT_ROUNDS = 10;
@@ -18,12 +19,20 @@ export class AuthHttpError extends Error {
 }
 
 export interface RegisterInput {
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   country: string;
   password: string;
   role: UserRole;
+  /** Required when role is service_provider */
+  businessName?: string;
+  website?: string;
+  /** Required when role is service_provider */
+  physicalAddress?: string;
+  /** Required when role is client; ISO date string YYYY-MM-DD */
+  dateOfBirth?: string;
 }
 
 export interface LoginInput {
@@ -63,26 +72,99 @@ function signToken(userId: string, role: UserRole): string {
 
 function toPublicUser(user: {
   _id: mongoose.Types.ObjectId;
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   role: UserRole;
   emailVerified: boolean;
+  dateOfBirth?: Date | null;
 }) {
   return {
     id: user._id.toString(),
-    name: user.name,
+    firstName: user.firstName,
+    lastName: user.lastName,
     email: user.email,
     role: user.role,
     emailVerified: user.emailVerified,
+    dateOfBirth:
+      user.dateOfBirth != null
+        ? new Date(user.dateOfBirth).toISOString().slice(0, 10)
+        : null,
   };
+}
+
+const MIN_AGE_YEARS = 13;
+
+function parseClientDateOfBirth(raw: string): Date {
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed) {
+    throw new AuthHttpError(400, "Date of birth is required");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    throw new AuthHttpError(400, "Invalid date of birth");
+  }
+  const [y, m, d] = trimmed.split("-").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  if (
+    utc.getUTCFullYear() !== y ||
+    utc.getUTCMonth() !== m - 1 ||
+    utc.getUTCDate() !== d
+  ) {
+    throw new AuthHttpError(400, "Invalid date of birth");
+  }
+  const today = new Date();
+  const todayUtc = Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate(),
+  );
+  if (utc.getTime() > todayUtc) {
+    throw new AuthHttpError(400, "Date of birth cannot be in the future");
+  }
+  const minCalendar = Date.UTC(1900, 0, 1);
+  if (utc.getTime() < minCalendar) {
+    throw new AuthHttpError(400, "Invalid date of birth");
+  }
+  const cutoff = new Date(today);
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - MIN_AGE_YEARS);
+  const cutoffUtc = Date.UTC(
+    cutoff.getUTCFullYear(),
+    cutoff.getUTCMonth(),
+    cutoff.getUTCDate(),
+  );
+  if (utc.getTime() > cutoffUtc) {
+    throw new AuthHttpError(
+      400,
+      `You must be at least ${MIN_AGE_YEARS} years old to register`,
+    );
+  }
+  return utc;
 }
 
 export async function register(
   input: RegisterInput
 ): Promise<{ token: string; user: ReturnType<typeof toPublicUser> }> {
-  const { name, email, phone, country, password, role } = input;
+  const {
+    firstName,
+    lastName,
+    email,
+    phone,
+    country,
+    password,
+    role,
+    businessName,
+    website,
+    physicalAddress,
+    dateOfBirth,
+  } = input;
 
-  if (!name?.trim() || !email?.trim() || !phone?.trim() || !country?.trim()) {
+  if (
+    !firstName?.trim() ||
+    !lastName?.trim() ||
+    !email?.trim() ||
+    !phone?.trim() ||
+    !country?.trim()
+  ) {
     throw new AuthHttpError(400, "All fields are required");
   }
   if (!password || password.length < 8) {
@@ -92,18 +174,34 @@ export async function register(
     throw new AuthHttpError(400, "Invalid role");
   }
 
+  let parsedDateOfBirth: Date | null = null;
+  if (role === "client") {
+    parsedDateOfBirth = parseClientDateOfBirth(dateOfBirth ?? "");
+  }
+
+  if (role === "service_provider") {
+    if (!businessName?.trim() || !physicalAddress?.trim()) {
+      throw new AuthHttpError(
+        400,
+        "Business name and physical address are required for service providers"
+      );
+    }
+  }
+
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
   let user;
   try {
     user = await User.create({
-      name: name.trim(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
       country: country.trim(),
       password: passwordHash,
       role,
       emailVerified: false,
+      dateOfBirth: parsedDateOfBirth,
     });
   } catch (err: unknown) {
     if (
@@ -115,6 +213,25 @@ export async function register(
       throw new AuthHttpError(409, "An account with this email already exists");
     }
     throw err;
+  }
+
+  if (role === "service_provider") {
+    const websiteTrimmed = website?.trim() ?? "";
+    try {
+      await ServiceProvider.create({
+        userId: user._id,
+        businessName: businessName!.trim(),
+        physicalAddress: physicalAddress!.trim(),
+        ...(websiteTrimmed ? { website: websiteTrimmed } : {}),
+      });
+    } catch (err: unknown) {
+      await User.findByIdAndDelete(user._id);
+      logger.error("service provider profile create failed; user rolled back", {
+        error: err,
+        userId: user._id.toString(),
+      });
+      throw new AuthHttpError(500, "Could not complete service provider signup");
+    }
   }
 
   await scheduleEmailVerificationOtp(user._id.toString(), user.email);
