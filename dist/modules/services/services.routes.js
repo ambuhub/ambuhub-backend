@@ -6,6 +6,8 @@ const services_controller_1 = require("./services.controller");
 const router = (0, express_1.Router)();
 router.get("/marketplace", services_controller_1.getMarketplaceServices);
 router.get("/me", authenticate_1.authenticate, authenticate_1.requireServiceProvider, services_controller_1.getMyServices);
+router.get("/me/:serviceId", authenticate_1.authenticate, authenticate_1.requireServiceProvider, services_controller_1.getMyServiceByIdHandler);
 router.post("/", authenticate_1.authenticate, authenticate_1.requireServiceProvider, services_controller_1.postCreateService);
 router.put("/:id", authenticate_1.authenticate, authenticate_1.requireServiceProvider, services_controller_1.putUpdateService);
+router.delete("/:id", authenticate_1.authenticate, authenticate_1.requireServiceProvider, services_controller_1.deleteMyService);
 exports.default = router;

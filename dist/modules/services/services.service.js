@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ServicesHttpError = void 0;
 exports.listMarketplaceServices = listMarketplaceServices;
 exports.listMyServices = listMyServices;
+exports.getMyServiceById = getMyServiceById;
+exports.deleteService = deleteService;
 exports.createService = createService;
 exports.updateService = updateService;
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -98,6 +100,35 @@ async function listMyServices(userId) {
         .sort({ createdAt: -1 })
         .lean();
     return rows.map((doc) => mapLeanServiceToDto(doc));
+}
+async function getMyServiceById(userId, serviceId) {
+    const trimmed = serviceId?.trim() ?? "";
+    if (!trimmed || !mongoose_1.default.Types.ObjectId.isValid(trimmed)) {
+        throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+    }
+    const doc = await service_model_1.Service.findOne({
+        _id: new mongoose_1.default.Types.ObjectId(trimmed),
+        userId: new mongoose_1.default.Types.ObjectId(userId),
+    })
+        .populate("serviceCategoryId", "name slug departments")
+        .lean();
+    if (!doc) {
+        throw new ServicesHttpError(404, "Service not found");
+    }
+    return mapLeanServiceToDto(doc);
+}
+async function deleteService(userId, serviceId) {
+    const trimmed = serviceId?.trim() ?? "";
+    if (!trimmed || !mongoose_1.default.Types.ObjectId.isValid(trimmed)) {
+        throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+    }
+    const result = await service_model_1.Service.findOneAndDelete({
+        _id: new mongoose_1.default.Types.ObjectId(trimmed),
+        userId: new mongoose_1.default.Types.ObjectId(userId),
+    });
+    if (!result) {
+        throw new ServicesHttpError(404, "Service not found");
+    }
 }
 function normalizeAndValidateServiceInput(categorySlug, input) {
     const { title, description, departmentSlug, listingType, stock, price, photoUrls = [], } = input;
@@ -247,5 +278,11 @@ async function updateService(userId, input) {
     if (!updated) {
         throw new ServicesHttpError(404, "Service not found");
     }
-    return updated;
+    const repopulated = await service_model_1.Service.findById(updated._id)
+        .populate("serviceCategoryId", "name slug departments")
+        .lean();
+    if (!repopulated) {
+        throw new ServicesHttpError(404, "Service not found");
+    }
+    return mapLeanServiceToDto(repopulated);
 }

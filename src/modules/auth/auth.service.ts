@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { User, type UserRole } from "../../models/user.model";
 import { ServiceProvider } from "../../models/serviceProvider.model";
 import { logger } from "../../shared/lib/logger";
+import { normalizeCountryCode } from "../../shared/lib/countryCode";
 
 const SALT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
@@ -23,7 +24,8 @@ export interface RegisterInput {
   lastName: string;
   email: string;
   phone: string;
-  country: string;
+  /** ISO 3166-1 alpha-2, uppercase preferred (e.g. US, NG) */
+  countryCode: string;
   password: string;
   role: UserRole;
   /** Required when role is service_provider */
@@ -149,7 +151,7 @@ export async function register(
     lastName,
     email,
     phone,
-    country,
+    countryCode,
     password,
     role,
     businessName,
@@ -163,7 +165,7 @@ export async function register(
     !lastName?.trim() ||
     !email?.trim() ||
     !phone?.trim() ||
-    !country?.trim()
+    !countryCode?.trim()
   ) {
     throw new AuthHttpError(400, "All fields are required");
   }
@@ -172,6 +174,14 @@ export async function register(
   }
   if (role !== "client" && role !== "service_provider") {
     throw new AuthHttpError(400, "Invalid role");
+  }
+
+  const normalizedCountryCode = normalizeCountryCode(countryCode);
+  if (!normalizedCountryCode) {
+    throw new AuthHttpError(
+      400,
+      "Country must be a valid ISO 3166-1 alpha-2 code",
+    );
   }
 
   let parsedDateOfBirth: Date | null = null;
@@ -197,7 +207,7 @@ export async function register(
       lastName: lastName.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
-      country: country.trim(),
+      countryCode: normalizedCountryCode,
       password: passwordHash,
       role,
       emailVerified: false,

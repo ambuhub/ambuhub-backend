@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMarketplaceServices = getMarketplaceServices;
 exports.getMyServices = getMyServices;
+exports.getMyServiceByIdHandler = getMyServiceByIdHandler;
+exports.deleteMyService = deleteMyService;
 exports.postCreateService = postCreateService;
 exports.putUpdateService = putUpdateService;
 const services_service_1 = require("./services.service");
@@ -77,6 +79,44 @@ async function getMyServices(req, res) {
         }
         const services = await (0, services_service_1.listMyServices)(req.auth.userId);
         res.status(200).json({ services });
+    }
+    catch (err) {
+        if (err instanceof services_service_1.ServicesHttpError) {
+            res.status(err.statusCode).json({ message: err.message });
+            return;
+        }
+        throw err;
+    }
+}
+async function getMyServiceByIdHandler(req, res) {
+    try {
+        if (!req.auth) {
+            res.status(401).json({ message: "Unauthorized" });
+            return;
+        }
+        const rawId = req.params.serviceId;
+        const serviceId = typeof rawId === "string" ? rawId : "";
+        const service = await (0, services_service_1.getMyServiceById)(req.auth.userId, serviceId);
+        res.status(200).json({ service });
+    }
+    catch (err) {
+        if (err instanceof services_service_1.ServicesHttpError) {
+            res.status(err.statusCode).json({ message: err.message });
+            return;
+        }
+        throw err;
+    }
+}
+async function deleteMyService(req, res) {
+    try {
+        if (!req.auth) {
+            res.status(401).json({ message: "Unauthorized" });
+            return;
+        }
+        const rawId = req.params.id;
+        const serviceId = typeof rawId === "string" ? rawId : "";
+        await (0, services_service_1.deleteService)(req.auth.userId, serviceId);
+        res.status(204).send();
     }
     catch (err) {
         if (err instanceof services_service_1.ServicesHttpError) {
