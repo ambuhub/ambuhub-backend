@@ -72,16 +72,42 @@ function signToken(userId: string, role: UserRole): string {
   );
 }
 
-function toPublicUser(user: {
-  _id: mongoose.Types.ObjectId;
+export type PublicAuthUserProvider = {
+  businessName: string;
+  physicalAddress: string;
+  website: string | null;
+};
+
+export type PublicAuthUser = {
+  id: string;
   firstName: string;
   lastName: string;
   email: string;
   role: UserRole;
   emailVerified: boolean;
-  dateOfBirth?: Date | null;
-}) {
-  return {
+  dateOfBirth: string | null;
+  phone: string;
+  countryCode: string;
+  businessName?: string;
+  physicalAddress?: string;
+  website?: string | null;
+};
+
+function toPublicUser(
+  user: {
+    _id: mongoose.Types.ObjectId;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    countryCode: string;
+    role: UserRole;
+    emailVerified: boolean;
+    dateOfBirth?: Date | null;
+  },
+  provider: PublicAuthUserProvider | null,
+): PublicAuthUser {
+  const base: PublicAuthUser = {
     id: user._id.toString(),
     firstName: user.firstName,
     lastName: user.lastName,
@@ -92,7 +118,15 @@ function toPublicUser(user: {
       user.dateOfBirth != null
         ? new Date(user.dateOfBirth).toISOString().slice(0, 10)
         : null,
+    phone: user.phone,
+    countryCode: user.countryCode,
   };
+  if (user.role === "service_provider" && provider) {
+    base.businessName = provider.businessName;
+    base.physicalAddress = provider.physicalAddress;
+    base.website = provider.website;
+  }
+  return base;
 }
 
 const MIN_AGE_YEARS = 13;
@@ -145,7 +179,7 @@ function parseClientDateOfBirth(raw: string): Date {
 
 export async function register(
   input: RegisterInput
-): Promise<{ token: string; user: ReturnType<typeof toPublicUser> }> {
+): Promise<{ token: string; user: PublicAuthUser }> {
   const {
     firstName,
     lastName,
@@ -225,6 +259,8 @@ export async function register(
     throw err;
   }
 
+  let providerForResponse: PublicAuthUserProvider | null = null;
+
   if (role === "service_provider") {
     const websiteTrimmed = website?.trim() ?? "";
     try {
@@ -242,6 +278,11 @@ export async function register(
       });
       throw new AuthHttpError(500, "Could not complete service provider signup");
     }
+    providerForResponse = {
+      businessName: businessName!.trim(),
+      physicalAddress: physicalAddress!.trim(),
+      website: websiteTrimmed !== "" ? websiteTrimmed : null,
+    };
   }
 
   await scheduleEmailVerificationOtp(user._id.toString(), user.email);
@@ -250,13 +291,13 @@ export async function register(
 
   return {
     token,
-    user: toPublicUser(user),
+    user: toPublicUser(user, providerForResponse),
   };
 }
 
 export async function login(
   input: LoginInput
-): Promise<{ token: string; user: ReturnType<typeof toPublicUser> }> {
+): Promise<{ token: string; user: PublicAuthUser }> {
   const { email, password } = input;
   if (!email?.trim() || !password) {
     throw new AuthHttpError(400, "Email and password are required");
@@ -275,10 +316,28 @@ export async function login(
     throw new AuthHttpError(401, "Invalid email or password");
   }
 
+  let providerForResponse: PublicAuthUserProvider | null = null;
+  if (user.role === "service_provider") {
+    const row = await ServiceProvider.findOne({ userId: user._id }).lean();
+    if (
+      row &&
+      typeof row.businessName === "string" &&
+      typeof row.physicalAddress === "string"
+    ) {
+      const w = row.website;
+      providerForResponse = {
+        businessName: row.businessName,
+        physicalAddress: row.physicalAddress,
+        website:
+          typeof w === "string" && w.trim() !== "" ? w.trim() : null,
+      };
+    }
+  }
+
   const token = signToken(user._id.toString(), user.role);
 
   return {
     token,
-    user: toPublicUser(user),
+    user: toPublicUser(user, providerForResponse),
   };
 }

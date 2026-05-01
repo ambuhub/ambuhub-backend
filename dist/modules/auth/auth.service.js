@@ -43,8 +43,8 @@ async function scheduleEmailVerificationOtp(userId, email) {
 function signToken(userId, role) {
     return jsonwebtoken_1.default.sign({ sub: userId, userId, role }, requireEnvJwtSecret(), { expiresIn: JWT_EXPIRES });
 }
-function toPublicUser(user) {
-    return {
+function toPublicUser(user, provider) {
+    const base = {
         id: user._id.toString(),
         firstName: user.firstName,
         lastName: user.lastName,
@@ -54,7 +54,15 @@ function toPublicUser(user) {
         dateOfBirth: user.dateOfBirth != null
             ? new Date(user.dateOfBirth).toISOString().slice(0, 10)
             : null,
+        phone: user.phone,
+        countryCode: user.countryCode,
     };
+    if (user.role === "service_provider" && provider) {
+        base.businessName = provider.businessName;
+        base.physicalAddress = provider.physicalAddress;
+        base.website = provider.website;
+    }
+    return base;
 }
 const MIN_AGE_YEARS = 13;
 function parseClientDateOfBirth(raw) {
@@ -141,6 +149,7 @@ async function register(input) {
         }
         throw err;
     }
+    let providerForResponse = null;
     if (role === "service_provider") {
         const websiteTrimmed = website?.trim() ?? "";
         try {
@@ -159,12 +168,17 @@ async function register(input) {
             });
             throw new AuthHttpError(500, "Could not complete service provider signup");
         }
+        providerForResponse = {
+            businessName: businessName.trim(),
+            physicalAddress: physicalAddress.trim(),
+            website: websiteTrimmed !== "" ? websiteTrimmed : null,
+        };
     }
     await scheduleEmailVerificationOtp(user._id.toString(), user.email);
     const token = signToken(user._id.toString(), user.role);
     return {
         token,
-        user: toPublicUser(user),
+        user: toPublicUser(user, providerForResponse),
     };
 }
 async function login(input) {
@@ -182,9 +196,23 @@ async function login(input) {
     if (!match) {
         throw new AuthHttpError(401, "Invalid email or password");
     }
+    let providerForResponse = null;
+    if (user.role === "service_provider") {
+        const row = await serviceProvider_model_1.ServiceProvider.findOne({ userId: user._id }).lean();
+        if (row &&
+            typeof row.businessName === "string" &&
+            typeof row.physicalAddress === "string") {
+            const w = row.website;
+            providerForResponse = {
+                businessName: row.businessName,
+                physicalAddress: row.physicalAddress,
+                website: typeof w === "string" && w.trim() !== "" ? w.trim() : null,
+            };
+        }
+    }
     const token = signToken(user._id.toString(), user.role);
     return {
         token,
-        user: toPublicUser(user),
+        user: toPublicUser(user, providerForResponse),
     };
 }
