@@ -6,11 +6,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthHttpError = void 0;
 exports.scheduleEmailVerificationOtp = scheduleEmailVerificationOtp;
 exports.register = register;
+exports.getSessionUser = getSessionUser;
 exports.login = login;
+exports.resetPasswordWithoutVerification = resetPasswordWithoutVerification;
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const mongoose_1 = __importDefault(require("mongoose"));
 const user_model_1 = require("../../models/user.model");
 const serviceProvider_model_1 = require("../../models/serviceProvider.model");
+const wallet_service_1 = require("../wallet/wallet.service");
 const logger_1 = require("../../shared/lib/logger");
 const countryCode_1 = require("../../shared/lib/countryCode");
 const SALT_ROUNDS = 10;
@@ -159,8 +163,23 @@ async function register(input) {
                 physicalAddress: physicalAddress.trim(),
                 ...(websiteTrimmed ? { website: websiteTrimmed } : {}),
             });
+            try {
+                await (0, wallet_service_1.ensureWallet)(user._id.toString());
+            }
+            catch (walletErr) {
+                await serviceProvider_model_1.ServiceProvider.deleteOne({ userId: user._id });
+                await user_model_1.User.findByIdAndDelete(user._id);
+                logger_1.logger.error("wallet create failed; provider signup rolled back", {
+                    error: walletErr,
+                    userId: user._id.toString(),
+                });
+                throw new AuthHttpError(500, "Could not complete service provider signup");
+            }
         }
         catch (err) {
+            if (err instanceof AuthHttpError) {
+                throw err;
+            }
             await user_model_1.User.findByIdAndDelete(user._id);
             logger_1.logger.error("service provider profile create failed; user rolled back", {
                 error: err,
@@ -180,6 +199,31 @@ async function register(input) {
         token,
         user: toPublicUser(user, providerForResponse),
     };
+}
+async function getSessionUser(userId) {
+    const trimmed = userId?.trim() ?? "";
+    if (!trimmed || !mongoose_1.default.Types.ObjectId.isValid(trimmed)) {
+        return null;
+    }
+    const user = await user_model_1.User.findById(trimmed).lean();
+    if (!user) {
+        return null;
+    }
+    let providerForResponse = null;
+    if (user.role === "service_provider") {
+        const row = await serviceProvider_model_1.ServiceProvider.findOne({ userId: user._id }).lean();
+        if (row &&
+            typeof row.businessName === "string" &&
+            typeof row.physicalAddress === "string") {
+            const w = row.website;
+            providerForResponse = {
+                businessName: row.businessName,
+                physicalAddress: row.physicalAddress,
+                website: typeof w === "string" && w.trim() !== "" ? w.trim() : null,
+            };
+        }
+    }
+    return toPublicUser(user, providerForResponse);
 }
 async function login(input) {
     const { email, password } = input;
@@ -215,4 +259,28 @@ async function login(input) {
         token,
         user: toPublicUser(user, providerForResponse),
     };
+}
+/**
+ * Sets a new password from the account email only (no OTP or email link).
+ * Replace with email-based reset when outbound mail is available.
+ * Set DISABLE_UNVERIFIED_PASSWORD_RESET=true to turn this off (recommended once email reset ships).
+ */
+async function resetPasswordWithoutVerification(input) {
+    if (process.env.DISABLE_UNVERIFIED_PASSWORD_RESET === "true") {
+        throw new AuthHttpError(403, "Password reset without email is disabled on this server.");
+    }
+    const email = input.email?.trim().toLowerCase() ?? "";
+    const newPassword = input.newPassword ?? "";
+    if (!email) {
+        throw new AuthHttpError(400, "Email is required");
+    }
+    if (!newPassword || newPassword.length < 8) {
+        throw new AuthHttpError(400, "Password must be at least 8 characters");
+    }
+    const hash = await bcrypt_1.default.hash(newPassword, SALT_ROUNDS);
+    const result = await user_model_1.User.updateOne({ email }, { $set: { password: hash } });
+    logger_1.logger.info("Unverified password reset processed", {
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+    });
 }

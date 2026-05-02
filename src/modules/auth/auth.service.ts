@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { User, type UserRole } from "../../models/user.model";
 import { ServiceProvider } from "../../models/serviceProvider.model";
+import { ensureWallet } from "../wallet/wallet.service";
 import { logger } from "../../shared/lib/logger";
 import { normalizeCountryCode } from "../../shared/lib/countryCode";
 
@@ -270,7 +271,21 @@ export async function register(
         physicalAddress: physicalAddress!.trim(),
         ...(websiteTrimmed ? { website: websiteTrimmed } : {}),
       });
+      try {
+        await ensureWallet(user._id.toString());
+      } catch (walletErr: unknown) {
+        await ServiceProvider.deleteOne({ userId: user._id });
+        await User.findByIdAndDelete(user._id);
+        logger.error("wallet create failed; provider signup rolled back", {
+          error: walletErr,
+          userId: user._id.toString(),
+        });
+        throw new AuthHttpError(500, "Could not complete service provider signup");
+      }
     } catch (err: unknown) {
+      if (err instanceof AuthHttpError) {
+        throw err;
+      }
       await User.findByIdAndDelete(user._id);
       logger.error("service provider profile create failed; user rolled back", {
         error: err,
@@ -293,6 +308,38 @@ export async function register(
     token,
     user: toPublicUser(user, providerForResponse),
   };
+}
+
+export async function getSessionUser(userId: string): Promise<PublicAuthUser | null> {
+  const trimmed = userId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    return null;
+  }
+
+  const user = await User.findById(trimmed).lean();
+  if (!user) {
+    return null;
+  }
+
+  let providerForResponse: PublicAuthUserProvider | null = null;
+  if (user.role === "service_provider") {
+    const row = await ServiceProvider.findOne({ userId: user._id }).lean();
+    if (
+      row &&
+      typeof row.businessName === "string" &&
+      typeof row.physicalAddress === "string"
+    ) {
+      const w = row.website;
+      providerForResponse = {
+        businessName: row.businessName,
+        physicalAddress: row.physicalAddress,
+        website:
+          typeof w === "string" && w.trim() !== "" ? w.trim() : null,
+      };
+    }
+  }
+
+  return toPublicUser(user, providerForResponse);
 }
 
 export async function login(
@@ -340,4 +387,43 @@ export async function login(
     token,
     user: toPublicUser(user, providerForResponse),
   };
+}
+
+export interface ResetPasswordUnverifiedInput {
+  email: string;
+  newPassword: string;
+}
+
+/**
+ * Sets a new password from the account email only (no OTP or email link).
+ * Replace with email-based reset when outbound mail is available.
+ * Set DISABLE_UNVERIFIED_PASSWORD_RESET=true to turn this off (recommended once email reset ships).
+ */
+export async function resetPasswordWithoutVerification(
+  input: ResetPasswordUnverifiedInput,
+): Promise<void> {
+  if (process.env.DISABLE_UNVERIFIED_PASSWORD_RESET === "true") {
+    throw new AuthHttpError(
+      403,
+      "Password reset without email is disabled on this server.",
+    );
+  }
+
+  const email = input.email?.trim().toLowerCase() ?? "";
+  const newPassword = input.newPassword ?? "";
+
+  if (!email) {
+    throw new AuthHttpError(400, "Email is required");
+  }
+  if (!newPassword || newPassword.length < 8) {
+    throw new AuthHttpError(400, "Password must be at least 8 characters");
+  }
+
+  const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  const result = await User.updateOne({ email }, { $set: { password: hash } });
+
+  logger.info("Unverified password reset processed", {
+    matchedCount: result.matchedCount,
+    modifiedCount: result.modifiedCount,
+  });
 }

@@ -9,7 +9,8 @@
     "build": "tsc",
     "build:clean": "rm -rf dist && tsc",
     "start": "node dist/index.js",
-    "migrate:country-codes": "ts-node --transpile-only src/scripts/migrate-country-to-alpha2.ts"
+    "migrate:country-codes": "ts-node --transpile-only src/scripts/migrate-country-to-alpha2.ts",
+    "migrate:patient-to-client": "ts-node --transpile-only src/scripts/migrate-patient-role-to-client.ts"
   },
   "keywords": [
     "Ambulance",
