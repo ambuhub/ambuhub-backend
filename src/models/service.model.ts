@@ -1,6 +1,13 @@
 import mongoose from "mongoose";
 
 const listingTypeValues = ["sale", "hire", "book"] as const;
+const pricingPeriodValues = [
+  "hourly",
+  "daily",
+  "weekly",
+  "monthly",
+  "yearly",
+] as const;
 
 const serviceSchema = new mongoose.Schema(
   {
@@ -32,9 +39,15 @@ const serviceSchema = new mongoose.Schema(
       default: null,
       min: 0,
     },
+    pricingPeriod: {
+      type: String,
+      enum: [...pricingPeriodValues],
+      default: null,
+    },
     departmentSlug: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
     photoUrls: { type: [String], default: [] },
+    isAvailable: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

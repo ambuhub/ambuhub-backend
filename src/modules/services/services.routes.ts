@@ -5,9 +5,11 @@ import {
 } from "../../shared/middlewares/authenticate";
 import {
   deleteMyService,
+  getMarketplaceServiceByIdHandler,
   getMarketplaceServices,
   getMyServiceByIdHandler,
   getMyServices,
+  patchServiceAvailability,
   postCreateService,
   putUpdateService,
 } from "./services.controller";
@@ -15,6 +17,7 @@ import {
 const router = Router();
 
 router.get("/marketplace", getMarketplaceServices);
+router.get("/marketplace/:serviceId", getMarketplaceServiceByIdHandler);
 router.get("/me", authenticate, requireServiceProvider, getMyServices);
 router.get(
   "/me/:serviceId",
@@ -23,6 +26,12 @@ router.get(
   getMyServiceByIdHandler
 );
 router.post("/", authenticate, requireServiceProvider, postCreateService);
+router.patch(
+  "/:id/availability",
+  authenticate,
+  requireServiceProvider,
+  patchServiceAvailability
+);
 router.put("/:id", authenticate, requireServiceProvider, putUpdateService);
 router.delete("/:id", authenticate, requireServiceProvider, deleteMyService);
 

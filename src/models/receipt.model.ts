@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
 
+const pricingPeriodValues = ["hourly", "daily", "weekly", "monthly", "yearly"] as const;
+const lineKindValues = ["sale", "hire"] as const;
+
 /**
  * Immutable receipt snapshot tied to a paid order.
  * Kept separate from {@link Order} so receipts can be extended (PDF URL, email sent, etc.)
@@ -17,12 +20,25 @@ const receiptLineSchema = new mongoose.Schema(
       ref: "User",
       required: false,
     },
+    lineKind: {
+      type: String,
+      enum: lineKindValues,
+      required: false,
+    },
     title: { type: String, required: true },
     unitPriceNgn: { type: Number, required: true, min: 0 },
     quantity: { type: Number, required: true, min: 1 },
     lineTotalNgn: { type: Number, required: true, min: 0 },
     categoryName: { type: String, required: true },
     departmentName: { type: String, required: true },
+    hireStart: { type: Date, required: false },
+    hireEnd: { type: Date, required: false },
+    pricingPeriod: {
+      type: String,
+      enum: [...pricingPeriodValues],
+      required: false,
+    },
+    hireBillableUnits: { type: Number, required: false, min: 1 },
   },
   { _id: false },
 );

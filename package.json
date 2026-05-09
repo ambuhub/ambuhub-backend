@@ -14,7 +14,8 @@
     "migrate:order-line-seller-user-id": "ts-node --transpile-only src/scripts/migrate-order-line-seller-user-id.ts",
     "migrate:listing-types-sale-hire-book": "ts-node --transpile-only src/scripts/migrate-listing-types-sale-hire-book.ts",
     "migrate:dept-ambulance-maintenance-to-servicing": "ts-node --transpile-only src/scripts/migrate-department-ambulance-maintenance-to-servicing.ts",
-    "seed:orders-2026-provider": "ts-node --transpile-only src/scripts/seed-provider-orders-2026.ts"
+    "seed:orders-2026-provider": "ts-node --transpile-only src/scripts/seed-provider-orders-2026.ts",
+    "migrate:hire-stock-pricing": "ts-node --transpile-only src/scripts/migrate-hire-stock-and-pricing-by-category.ts"
   },
   "keywords": [
     "Ambulance",

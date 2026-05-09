@@ -6,12 +6,18 @@ import {
   getProviderSalesByMonthHandler,
   listMyOrdersHandler,
   listMyReceiptsHandler,
+  postHireSimulateCheckoutHandler,
   postSimulateCheckoutHandler,
 } from "./orders.controller";
 
 const router = Router();
 
 router.post("/checkout/simulate-paystack", authenticate, postSimulateCheckoutHandler);
+router.post(
+  "/hire-checkout/simulate-paystack",
+  authenticate,
+  postHireSimulateCheckoutHandler,
+);
 router.get(
   "/provider/sales-by-month",
   authenticate,

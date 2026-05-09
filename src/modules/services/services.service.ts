@@ -3,6 +3,22 @@ import { Service } from "../../models/service.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
 
 export type ListingType = "sale" | "hire" | "book";
+
+export type PricingPeriod =
+  | "hourly"
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "yearly";
+
+const PRICING_PERIODS = new Set<PricingPeriod>([
+  "hourly",
+  "daily",
+  "weekly",
+  "monthly",
+  "yearly",
+]);
+
 const PERSONNEL_CATEGORY_SLUG = "personnel";
 const AMBULANCE_SERVICING_CATEGORY_SLUG = "ambulance-servicing";
 const BOOK_LISTING_TYPE_CATEGORY_SLUGS = new Set([
@@ -30,6 +46,8 @@ export interface MyServiceDto {
   listingType: ListingType | null;
   stock: number | null;
   price: number | null;
+  pricingPeriod: PricingPeriod | null;
+  isAvailable: boolean;
   departmentSlug: string;
   departmentName: string;
   category: { id: string; slug: string; name: string };
@@ -55,6 +73,8 @@ type LeanPopulatedService = {
   listingType?: ListingType | null;
   stock?: number | null;
   price?: number | null;
+  pricingPeriod?: PricingPeriod | null;
+  isAvailable?: boolean | null;
   departmentSlug: string;
   photoUrls: unknown;
   createdAt: Date;
@@ -84,6 +104,12 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     }
   }
 
+  const rawPeriod = doc.pricingPeriod;
+  const pricingPeriod: PricingPeriod | null =
+    typeof rawPeriod === "string" && PRICING_PERIODS.has(rawPeriod as PricingPeriod)
+      ? (rawPeriod as PricingPeriod)
+      : null;
+
   return {
     id: doc._id.toString(),
     title: doc.title,
@@ -91,6 +117,8 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     listingType: doc.listingType ?? null,
     stock: typeof doc.stock === "number" ? doc.stock : null,
     price: typeof doc.price === "number" ? doc.price : null,
+    pricingPeriod,
+    isAvailable: doc.isAvailable !== false,
     departmentSlug: doc.departmentSlug,
     departmentName,
     category,
@@ -101,6 +129,11 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
 }
 
 const MARKETPLACE_LISTING_CAP = 200;
+
+/** Legacy documents may omit isAvailable; treat as listed. */
+const MARKETPLACE_AVAILABLE_FILTER = {
+  $or: [{ isAvailable: true }, { isAvailable: { $exists: false } }],
+} as const;
 
 export type MarketplaceServicesResult = {
   services: MarketplaceServiceDto[];
@@ -130,7 +163,11 @@ export async function listMarketplaceServices(
       typeof rawBanner === "string" && rawBanner.trim() !== ""
         ? rawBanner.trim()
         : null;
-    query = { serviceCategoryId: category._id };
+    query = {
+      $and: [{ serviceCategoryId: category._id }, MARKETPLACE_AVAILABLE_FILTER],
+    };
+  } else {
+    query = { ...MARKETPLACE_AVAILABLE_FILTER };
   }
 
   const rows = await Service.find(query)
@@ -146,6 +183,34 @@ export async function listMarketplaceServices(
     services: rows.map((doc) => mapLeanServiceToDto(doc as LeanPopulatedService)),
     bannerUrl,
   };
+}
+
+export async function getMarketplaceServiceById(
+  serviceId: string,
+): Promise<MarketplaceServiceDto> {
+  const trimmed = serviceId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+  }
+
+  const doc = await Service.findOne({
+    _id: new mongoose.Types.ObjectId(trimmed),
+    $or: [
+      { isAvailable: true },
+      { isAvailable: { $exists: false } },
+    ],
+  })
+    .populate<{ serviceCategoryId: PopulatedCategory | null }>(
+      "serviceCategoryId",
+      "name slug departments",
+    )
+    .lean();
+
+  if (!doc) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+
+  return mapLeanServiceToDto(doc as LeanPopulatedService);
 }
 
 export async function listMyServices(userId: string): Promise<MyServiceDto[]> {
@@ -211,6 +276,7 @@ export interface CreateServiceInput {
   listingType?: string | null;
   stock?: number | null;
   price?: number | null;
+  pricingPeriod?: string | null;
   photoUrls?: string[];
 }
 
@@ -224,6 +290,7 @@ function normalizeAndValidateServiceInput(
   listingType: ListingType | null;
   stock: number | null;
   price: number | null;
+  pricingPeriod: PricingPeriod | null;
   photoUrls: string[];
 } {
   const {
@@ -233,6 +300,7 @@ function normalizeAndValidateServiceInput(
     listingType,
     stock,
     price,
+    pricingPeriod,
     photoUrls = [],
   } = input;
 
@@ -323,10 +391,14 @@ function normalizeAndValidateServiceInput(
     );
   }
 
-  if (effectiveListingType !== "sale" && normalizedStock !== null) {
+  if (
+    effectiveListingType !== "sale" &&
+    effectiveListingType !== "hire" &&
+    normalizedStock !== null
+  ) {
     throw new ServicesHttpError(
       400,
-      "stock must be null unless listingType is 'sale'"
+      "stock must be null unless listingType is 'sale' or 'hire'"
     );
   }
 
@@ -350,10 +422,48 @@ function normalizeAndValidateServiceInput(
     );
   }
 
-  if (effectiveListingType !== "sale" && normalizedPrice !== null) {
+  if (
+    effectiveListingType !== "sale" &&
+    effectiveListingType !== "hire" &&
+    normalizedPrice !== null
+  ) {
     throw new ServicesHttpError(
       400,
-      "price must be null unless listingType is 'sale'"
+      "price must be null unless listingType is 'sale' or 'hire'"
+    );
+  }
+
+  const normalizedPricingPeriod = ((): PricingPeriod | null => {
+    if (pricingPeriod === null || pricingPeriod === undefined) {
+      return null;
+    }
+    if (typeof pricingPeriod !== "string") {
+      throw new ServicesHttpError(400, "pricingPeriod must be a string");
+    }
+    const trimmed = pricingPeriod.trim();
+    if (trimmed === "") {
+      return null;
+    }
+    if (!PRICING_PERIODS.has(trimmed as PricingPeriod)) {
+      throw new ServicesHttpError(
+        400,
+        "pricingPeriod must be one of: hourly, daily, weekly, monthly, yearly"
+      );
+    }
+    return trimmed as PricingPeriod;
+  })();
+
+  if (effectiveListingType === "hire") {
+    if (normalizedPricingPeriod === null) {
+      throw new ServicesHttpError(
+        400,
+        "pricingPeriod is required when listingType is 'hire'"
+      );
+    }
+  } else if (normalizedPricingPeriod !== null) {
+    throw new ServicesHttpError(
+      400,
+      "pricingPeriod must be null unless listingType is 'hire'"
     );
   }
 
@@ -368,6 +478,7 @@ function normalizeAndValidateServiceInput(
     listingType: effectiveListingType,
     stock: normalizedStock,
     price: normalizedPrice,
+    pricingPeriod: normalizedPricingPeriod,
     photoUrls: normalizedUrls,
   };
 }
@@ -405,8 +516,10 @@ export async function createService(
     listingType: normalized.listingType,
     stock: normalized.stock,
     price: normalized.price,
+    pricingPeriod: normalized.pricingPeriod,
     departmentSlug: normalized.departmentSlug,
     photoUrls: normalized.photoUrls,
+    isAvailable: true,
   });
 
   return doc.toObject();
@@ -467,8 +580,57 @@ export async function updateService(
       listingType: normalized.listingType,
       stock: normalized.stock,
       price: normalized.price,
+      pricingPeriod: normalized.pricingPeriod,
       photoUrls: normalized.photoUrls,
     },
+    { new: true }
+  ).lean();
+
+  if (!updated) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+
+  const repopulated = await Service.findById(updated._id)
+    .populate<{ serviceCategoryId: PopulatedCategory | null }>(
+      "serviceCategoryId",
+      "name slug departments"
+    )
+    .lean();
+
+  if (!repopulated) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+
+  return mapLeanServiceToDto(repopulated as LeanPopulatedService);
+}
+
+export async function setServiceAvailability(
+  userId: string,
+  serviceId: string,
+  isAvailable: boolean
+): Promise<MyServiceDto> {
+  const trimmed = serviceId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+  }
+  if (typeof isAvailable !== "boolean") {
+    throw new ServicesHttpError(400, "isAvailable must be a boolean");
+  }
+
+  const service = await Service.findById(trimmed).lean();
+  if (!service) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+  if (service.userId.toString() !== userId) {
+    throw new ServicesHttpError(
+      403,
+      "You can only update services you created"
+    );
+  }
+
+  const updated = await Service.findByIdAndUpdate(
+    service._id,
+    { isAvailable },
     { new: true }
   ).lean();
 

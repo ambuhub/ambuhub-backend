@@ -2,10 +2,12 @@ import type { Request, Response } from "express";
 import {
   createService,
   deleteService,
+  getMarketplaceServiceById,
   getMyServiceById,
   listMarketplaceServices,
   listMyServices,
   ServicesHttpError,
+  setServiceAvailability,
   updateService,
 } from "./services.service";
 
@@ -17,6 +19,7 @@ type ParsedServicePayload = {
   listingType: string | null | undefined;
   stock: number | null | undefined;
   price: number | null | undefined;
+  pricingPeriod: string | null | undefined;
   photoUrls: string[] | undefined;
 };
 
@@ -49,6 +52,13 @@ function parseServicePayload(body: Record<string, unknown>): ParsedServicePayloa
         : typeof priceRaw === "string"
           ? Number(priceRaw)
           : undefined;
+  const pricingPeriodRaw = body.pricingPeriod;
+  const pricingPeriod =
+    pricingPeriodRaw === null || pricingPeriodRaw === undefined
+      ? null
+      : typeof pricingPeriodRaw === "string"
+        ? pricingPeriodRaw
+        : undefined;
 
   return {
     title: String(body.title ?? ""),
@@ -58,6 +68,7 @@ function parseServicePayload(body: Record<string, unknown>): ParsedServicePayloa
     listingType,
     stock,
     price,
+    pricingPeriod,
     photoUrls,
   };
 }
@@ -86,6 +97,23 @@ export async function getMarketplaceServices(
 
     const { services, bannerUrl } = await listMarketplaceServices(categorySlug);
     res.status(200).json({ services, bannerUrl });
+  } catch (err: unknown) {
+    if (err instanceof ServicesHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getMarketplaceServiceByIdHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const serviceId = typeof req.params.serviceId === "string" ? req.params.serviceId : "";
+    const service = await getMarketplaceServiceById(serviceId);
+    res.status(200).json({ service });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
       res.status(err.statusCode).json({ message: err.message });
@@ -183,6 +211,7 @@ export async function postCreateService(
       listingType: payload.listingType,
       stock: payload.stock,
       price: payload.price,
+      pricingPeriod: payload.pricingPeriod,
       photoUrls: payload.photoUrls,
     });
 
@@ -220,9 +249,45 @@ export async function putUpdateService(
       listingType: payload.listingType,
       stock: payload.stock,
       price: payload.price,
+      pricingPeriod: payload.pricingPeriod,
       photoUrls: payload.photoUrls,
     });
 
+    res.status(200).json({ service });
+  } catch (err: unknown) {
+    if (err instanceof ServicesHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function patchServiceAvailability(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const rawId = req.params.id;
+    const serviceId = typeof rawId === "string" ? rawId : "";
+    const body = req.body as Record<string, unknown>;
+    const raw = body.isAvailable;
+
+    if (raw !== true && raw !== false) {
+      res.status(400).json({ message: "isAvailable must be a boolean" });
+      return;
+    }
+
+    const service = await setServiceAvailability(
+      req.auth.userId,
+      serviceId,
+      raw
+    );
     res.status(200).json({ service });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {

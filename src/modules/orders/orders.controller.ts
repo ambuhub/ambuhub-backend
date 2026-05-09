@@ -8,6 +8,7 @@ import {
   listMyOrders,
   listMyReceipts,
   OrdersHttpError,
+  simulateHirePaystackCheckout,
   simulatePaystackCheckout,
 } from "./orders.service";
 
@@ -21,6 +22,30 @@ export async function postSimulateCheckoutHandler(
       return;
     }
     const result = await simulatePaystackCheckout(req.auth.userId);
+    res.status(201).json(result);
+  } catch (err: unknown) {
+    if (err instanceof OrdersHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    if (err instanceof CartHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function postHireSimulateCheckoutHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const result = await simulateHirePaystackCheckout(req.auth.userId, req.body ?? {});
     res.status(201).json(result);
   } catch (err: unknown) {
     if (err instanceof OrdersHttpError) {

@@ -2,7 +2,15 @@ import mongoose from "mongoose";
 import { Cart } from "../../models/cart.model";
 import { Service } from "../../models/service.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
-import type { ListingType } from "../services/services.service";
+import type { ListingType, PricingPeriod } from "../services/services.service";
+
+const HIRE_PRICING_PERIODS = new Set<PricingPeriod>([
+  "hourly",
+  "daily",
+  "weekly",
+  "monthly",
+  "yearly",
+]);
 
 export class CartHttpError extends Error {
   constructor(
@@ -28,6 +36,8 @@ type LeanServiceForCart = {
   listingType?: ListingType | null;
   stock?: number | null;
   price?: number | null;
+  pricingPeriod?: string | null;
+  isAvailable?: boolean | null;
   departmentSlug: string;
   photoUrls: unknown;
   serviceCategoryId: PopulatedCategory | null;
@@ -51,7 +61,9 @@ export type CartDto = {
   items: CartLineDto[];
 };
 
-function mapServiceToLineMeta(doc: LeanServiceForCart): Omit<CartLineDto, "quantity" | "lineTotalNgn"> {
+export function mapServiceToLineMeta(
+  doc: LeanServiceForCart,
+): Omit<CartLineDto, "quantity" | "lineTotalNgn"> {
   const cat = doc.serviceCategoryId;
   const deptSlug = doc.departmentSlug;
   let departmentName = deptSlug;
@@ -108,6 +120,10 @@ async function loadSaleServiceForCart(
     throw new CartHttpError(400, "Only sale listings can be added to the cart");
   }
 
+  if (lean.isAvailable === false) {
+    throw new CartHttpError(400, "This listing is not available");
+  }
+
   const price = typeof lean.price === "number" ? lean.price : null;
   const stock = typeof lean.stock === "number" ? lean.stock : null;
 
@@ -120,6 +136,71 @@ async function loadSaleServiceForCart(
   }
 
   return lean;
+}
+
+export async function loadHireServiceForCheckout(
+  serviceId: string,
+  buyerUserId: string,
+  quantity: number,
+): Promise<LeanServiceForCart & { pricingPeriod: PricingPeriod }> {
+  const trimmed = serviceId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new CartHttpError(400, "serviceId must be a valid ObjectId");
+  }
+
+  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity < 1) {
+    throw new CartHttpError(400, "quantity must be a positive integer");
+  }
+
+  const doc = await Service.findById(trimmed)
+    .populate<{ serviceCategoryId: PopulatedCategory | null }>(
+      "serviceCategoryId",
+      "name slug departments",
+    )
+    .lean();
+
+  if (!doc) {
+    throw new CartHttpError(404, "Service not found");
+  }
+
+  const lean = doc as LeanServiceForCart;
+  if (lean.userId.toString() === buyerUserId) {
+    throw new CartHttpError(400, "You cannot book your own listing");
+  }
+
+  if (lean.listingType !== "hire") {
+    throw new CartHttpError(400, "Only hire listings can be booked this way");
+  }
+
+  if (lean.isAvailable === false) {
+    throw new CartHttpError(400, "This listing is not available");
+  }
+
+  const price = typeof lean.price === "number" ? lean.price : null;
+  const stock = typeof lean.stock === "number" ? lean.stock : null;
+  const rawPeriod = lean.pricingPeriod;
+  const pricingPeriod: PricingPeriod | null =
+    typeof rawPeriod === "string" && HIRE_PRICING_PERIODS.has(rawPeriod as PricingPeriod)
+      ? (rawPeriod as PricingPeriod)
+      : null;
+
+  if (price === null || price < 0) {
+    throw new CartHttpError(400, "This hire listing does not have a valid price");
+  }
+
+  if (pricingPeriod === null) {
+    throw new CartHttpError(400, "This hire listing does not have a valid pricing period");
+  }
+
+  if (stock === null || stock < 1) {
+    throw new CartHttpError(400, "This listing is out of stock");
+  }
+
+  if (quantity > stock) {
+    throw new CartHttpError(400, "Quantity exceeds available stock");
+  }
+
+  return { ...lean, pricingPeriod };
 }
 
 export async function getCart(userId: string): Promise<CartDto> {
