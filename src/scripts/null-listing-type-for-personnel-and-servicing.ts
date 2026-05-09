@@ -8,7 +8,7 @@ dotenv.config();
 
 const TARGET_CATEGORY_SLUGS = ["personnel", "ambulance-servicing"];
 
-async function setListingTypeToNullForTargetCategories(): Promise<void> {
+async function setListingTypeToBookForTargetCategories(): Promise<void> {
   await connectDatabase();
 
   const categories = await ServiceCategory.find(
@@ -26,21 +26,25 @@ async function setListingTypeToNullForTargetCategories(): Promise<void> {
   const result = await Service.updateMany(
     {
       serviceCategoryId: { $in: categoryIds },
-      $or: [{ listingType: { $exists: false } }, { listingType: { $ne: null } }],
+      $or: [
+        { listingType: { $exists: false } },
+        { listingType: null },
+        { listingType: { $ne: "book" } },
+      ],
     },
     {
-      $set: { listingType: null },
+      $set: { listingType: "book" },
     },
   );
 
-  console.log("Null listingType migration complete.");
+  console.log("Book listingType migration complete.");
   console.log(`Matched services: ${result.matchedCount}`);
   console.log(`Modified services: ${result.modifiedCount}`);
 }
 
-setListingTypeToNullForTargetCategories()
+setListingTypeToBookForTargetCategories()
   .catch((error) => {
-    console.error("Null listingType migration failed:", error);
+    console.error("Book listingType migration failed:", error);
     process.exitCode = 1;
   })
   .finally(async () => {

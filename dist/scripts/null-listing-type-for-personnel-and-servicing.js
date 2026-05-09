@@ -10,7 +10,7 @@ const service_model_1 = require("../models/service.model");
 const serviceCategory_model_1 = require("../models/serviceCategory.model");
 dotenv_1.default.config();
 const TARGET_CATEGORY_SLUGS = ["personnel", "ambulance-servicing"];
-async function setListingTypeToNullForTargetCategories() {
+async function setListingTypeToBookForTargetCategories() {
     await (0, database_1.connectDatabase)();
     const categories = await serviceCategory_model_1.ServiceCategory.find({ slug: { $in: TARGET_CATEGORY_SLUGS } }, "_id slug").lean();
     const categoryIds = categories.map((category) => category._id);
@@ -20,17 +20,21 @@ async function setListingTypeToNullForTargetCategories() {
     }
     const result = await service_model_1.Service.updateMany({
         serviceCategoryId: { $in: categoryIds },
-        $or: [{ listingType: { $exists: false } }, { listingType: { $ne: null } }],
+        $or: [
+            { listingType: { $exists: false } },
+            { listingType: null },
+            { listingType: { $ne: "book" } },
+        ],
     }, {
-        $set: { listingType: null },
+        $set: { listingType: "book" },
     });
-    console.log("Null listingType migration complete.");
+    console.log("Book listingType migration complete.");
     console.log(`Matched services: ${result.matchedCount}`);
     console.log(`Modified services: ${result.modifiedCount}`);
 }
-setListingTypeToNullForTargetCategories()
+setListingTypeToBookForTargetCategories()
     .catch((error) => {
-    console.error("Null listingType migration failed:", error);
+    console.error("Book listingType migration failed:", error);
     process.exitCode = 1;
 })
     .finally(async () => {

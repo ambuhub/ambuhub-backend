@@ -6,8 +6,13 @@ import { ServiceCategory } from "../models/serviceCategory.model";
 
 dotenv.config();
 
-const EXCLUDED_CATEGORY_SLUGS = new Set(["personnel", "ambulance-servicing"]);
-const VALID_LISTING_TYPES = new Set(["sale", "rent"]);
+const EXCLUDED_CATEGORY_SLUGS = new Set([
+  "personnel",
+  "ambulance-servicing",
+  "medical-transport",
+]);
+const MEDICAL_TRANSPORT_SLUG = "medical-transport";
+const VALID_LISTING_TYPES = new Set(["sale", "hire", "book"]);
 
 async function backfillListingType(): Promise<void> {
   await connectDatabase();
@@ -32,7 +37,7 @@ async function backfillListingType(): Promise<void> {
       $or: [
         { listingType: { $exists: false } },
         { listingType: null },
-        { listingType: { $nin: ["sale", "rent"] } },
+        { listingType: { $nin: ["sale", "hire", "book"] } },
       ],
     },
     "_id listingType createdAt",
@@ -46,13 +51,13 @@ async function backfillListingType(): Promise<void> {
   }
 
   const saleIds: mongoose.Types.ObjectId[] = [];
-  const rentIds: mongoose.Types.ObjectId[] = [];
+  const hireIds: mongoose.Types.ObjectId[] = [];
 
   docsToUpdate.forEach((doc, index) => {
     if (index % 2 === 0) {
       saleIds.push(doc._id);
     } else {
-      rentIds.push(doc._id);
+      hireIds.push(doc._id);
     }
   });
 
@@ -64,18 +69,39 @@ async function backfillListingType(): Promise<void> {
         )
       : { modifiedCount: 0 };
 
-  const rentResult =
-    rentIds.length > 0
+  const hireResult =
+    hireIds.length > 0
       ? await Service.updateMany(
-          { _id: { $in: rentIds } },
-          { $set: { listingType: "rent" } },
+          { _id: { $in: hireIds } },
+          { $set: { listingType: "hire" } },
         )
       : { modifiedCount: 0 };
 
   console.log("Backfill complete.");
   console.log(`Eligible services updated: ${docsToUpdate.length}`);
   console.log(`Set to sale: ${saleResult.modifiedCount}`);
-  console.log(`Set to rent: ${rentResult.modifiedCount}`);
+  console.log(`Set to hire: ${hireResult.modifiedCount}`);
+
+  const mtCat = await ServiceCategory.findOne(
+    { slug: MEDICAL_TRANSPORT_SLUG },
+    "_id",
+  ).lean<{ _id: mongoose.Types.ObjectId } | null>();
+  if (mtCat?._id) {
+    const mtResult = await Service.updateMany(
+      {
+        serviceCategoryId: mtCat._id,
+        $or: [
+          { listingType: { $exists: false } },
+          { listingType: null },
+          { listingType: { $ne: "hire" } },
+        ],
+      },
+      { $set: { listingType: "hire" } },
+    );
+    console.log(
+      `Medical transport default hire: matched ${mtResult.matchedCount}, modified ${mtResult.modifiedCount}`,
+    );
+  }
 }
 
 backfillListingType()

@@ -11,6 +11,12 @@ const orderLineSchema = new mongoose_1.default.Schema({
         ref: "Service",
         required: true,
     },
+    /** Listing owner at checkout; used for reporting when the service row is deleted. */
+    sellerUserId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: "User",
+        required: false,
+    },
     title: { type: String, required: true },
     unitPriceNgn: { type: Number, required: true, min: 0 },
     quantity: { type: Number, required: true, min: 1 },

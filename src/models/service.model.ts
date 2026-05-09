@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const listingTypeValues = ["sale", "rent"] as const;
+const listingTypeValues = ["sale", "hire", "book"] as const;
 
 const serviceSchema = new mongoose.Schema(
   {

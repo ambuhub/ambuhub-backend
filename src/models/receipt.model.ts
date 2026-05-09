@@ -12,6 +12,11 @@ const receiptLineSchema = new mongoose.Schema(
       ref: "Service",
       required: true,
     },
+    sellerUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: false,
+    },
     title: { type: String, required: true },
     unitPriceNgn: { type: Number, required: true, min: 0 },
     quantity: { type: Number, required: true, min: 1 },

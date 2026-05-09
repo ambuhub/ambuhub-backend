@@ -2,13 +2,16 @@ import mongoose from "mongoose";
 import { Service } from "../../models/service.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
 
-export type ListingType = "sale" | "rent";
+export type ListingType = "sale" | "hire" | "book";
 const PERSONNEL_CATEGORY_SLUG = "personnel";
 const AMBULANCE_SERVICING_CATEGORY_SLUG = "ambulance-servicing";
-const NULL_LISTING_TYPE_CATEGORY_SLUGS = new Set([
+const BOOK_LISTING_TYPE_CATEGORY_SLUGS = new Set([
   PERSONNEL_CATEGORY_SLUG,
   AMBULANCE_SERVICING_CATEGORY_SLUG,
 ]);
+
+const MEDICAL_TRANSPORT_CATEGORY_SLUG = "medical-transport";
+const HIRE_LISTING_TYPE_CATEGORY_SLUGS = new Set([MEDICAL_TRANSPORT_CATEGORY_SLUG]);
 
 export class ServicesHttpError extends Error {
   constructor(
@@ -251,37 +254,51 @@ function normalizeAndValidateServiceInput(
     if (typeof listingType !== "string") {
       throw new ServicesHttpError(
         400,
-        "listingType must be 'sale' or 'rent' for non-personnel categories"
+        "listingType must be 'sale', 'hire', or 'book'"
       );
     }
     const trimmed = listingType.trim();
     if (trimmed === "") {
       return null;
     }
-    if (trimmed === "sale" || trimmed === "rent") {
+    if (trimmed === "sale" || trimmed === "hire" || trimmed === "book") {
       return trimmed;
     }
     throw new ServicesHttpError(
       400,
-      "listingType must be 'sale' or 'rent' for non-personnel categories"
+      "listingType must be 'sale', 'hire', or 'book'"
     );
   })();
 
-  const mustUseNullListingType = NULL_LISTING_TYPE_CATEGORY_SLUGS.has(categorySlug);
+  const mustUseBookListingType = BOOK_LISTING_TYPE_CATEGORY_SLUGS.has(categorySlug);
+  const mustUseHireListingType = HIRE_LISTING_TYPE_CATEGORY_SLUGS.has(categorySlug);
 
-  if (mustUseNullListingType && normalizedListingType !== null) {
+  if (mustUseBookListingType && normalizedListingType !== null && normalizedListingType !== "book") {
     throw new ServicesHttpError(
       400,
-      "listingType must be null for personnel and ambulance-servicing categories"
+      "listingType must be 'book' for personnel and ambulance-servicing categories"
     );
   }
 
-  if (!mustUseNullListingType && normalizedListingType === null) {
+  if (mustUseHireListingType && normalizedListingType !== null && normalizedListingType !== "hire") {
     throw new ServicesHttpError(
       400,
-      "listingType is required and must be 'sale' or 'rent' for this category"
+      "listingType must be 'hire' for medical-transport category"
     );
   }
+
+  if (!mustUseBookListingType && !mustUseHireListingType && normalizedListingType === null) {
+    throw new ServicesHttpError(
+      400,
+      "listingType is required and must be 'sale' or 'hire' for this category"
+    );
+  }
+
+  const effectiveListingType: ListingType | null = mustUseBookListingType
+    ? "book"
+    : mustUseHireListingType
+      ? "hire"
+      : (normalizedListingType as ListingType | null);
 
   const normalizedStock = (() => {
     if (stock === null || stock === undefined) {
@@ -299,14 +316,14 @@ function normalizeAndValidateServiceInput(
     return stock;
   })();
 
-  if (normalizedListingType === "sale" && normalizedStock === null) {
+  if (effectiveListingType === "sale" && normalizedStock === null) {
     throw new ServicesHttpError(
       400,
       "stock is required when listingType is 'sale'"
     );
   }
 
-  if (normalizedListingType !== "sale" && normalizedStock !== null) {
+  if (effectiveListingType !== "sale" && normalizedStock !== null) {
     throw new ServicesHttpError(
       400,
       "stock must be null unless listingType is 'sale'"
@@ -326,14 +343,14 @@ function normalizeAndValidateServiceInput(
     return price;
   })();
 
-  if (normalizedListingType === "sale" && normalizedPrice === null) {
+  if (effectiveListingType === "sale" && normalizedPrice === null) {
     throw new ServicesHttpError(
       400,
       "price is required when listingType is 'sale'"
     );
   }
 
-  if (normalizedListingType !== "sale" && normalizedPrice !== null) {
+  if (effectiveListingType !== "sale" && normalizedPrice !== null) {
     throw new ServicesHttpError(
       400,
       "price must be null unless listingType is 'sale'"
@@ -348,7 +365,7 @@ function normalizeAndValidateServiceInput(
     title: title.trim(),
     description: description.trim(),
     departmentSlug: departmentSlug.trim(),
-    listingType: normalizedListingType,
+    listingType: effectiveListingType,
     stock: normalizedStock,
     price: normalizedPrice,
     photoUrls: normalizedUrls,

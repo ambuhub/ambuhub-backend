@@ -27,6 +27,8 @@ export class OrdersHttpError extends Error {
 
 export type OrderLineDto = {
   serviceId: string;
+  /** Present on orders created after seller snapshot was added. */
+  sellerUserId?: string;
   title: string;
   unitPriceNgn: number;
   quantity: number;
@@ -86,6 +88,7 @@ function mapOrderDetail(doc: {
   subtotalNgn: number;
   lines: {
     serviceId: mongoose.Types.ObjectId;
+    sellerUserId?: mongoose.Types.ObjectId;
     title: string;
     unitPriceNgn: number;
     quantity: number;
@@ -107,6 +110,9 @@ function mapOrderDetail(doc: {
     subtotalNgn: doc.subtotalNgn,
     lines: doc.lines.map((l) => ({
       serviceId: l.serviceId.toString(),
+      ...(l.sellerUserId
+        ? { sellerUserId: l.sellerUserId.toString() }
+        : {}),
       title: l.title,
       unitPriceNgn: l.unitPriceNgn,
       quantity: l.quantity,
@@ -213,16 +219,41 @@ export async function simulatePaystackCheckout(
   const paystackReference = generateSimulatedPaystackReference();
   const paidAt = new Date();
 
-  const orderLines = lines.map((l) => ({
-    serviceId: l.serviceId,
-    title: l.title,
-    unitPriceNgn: l.unitPriceNgn,
-    quantity: l.quantity,
-    lineTotalNgn: l.lineTotalNgn,
-    categoryName: l.categoryName,
-    categorySlug: l.categorySlug,
-    departmentName: l.departmentName,
-  }));
+  const uniqueServiceIds = [
+    ...new Map(lines.map((l) => [l.serviceId.toString(), l.serviceId])).values(),
+  ];
+  const sellerRows = await Service.find({ _id: { $in: uniqueServiceIds } })
+    .select("_id userId")
+    .lean();
+  if (sellerRows.length !== uniqueServiceIds.length) {
+    throw new OrdersHttpError(500, "Could not resolve listing owners for checkout.");
+  }
+  const sellerByServiceId = new Map<string, mongoose.Types.ObjectId>();
+  for (const row of sellerRows) {
+    const uid = row.userId as mongoose.Types.ObjectId | undefined;
+    if (!uid) {
+      throw new OrdersHttpError(500, "Could not resolve listing owners for checkout.");
+    }
+    sellerByServiceId.set((row._id as mongoose.Types.ObjectId).toString(), uid);
+  }
+
+  const orderLines = lines.map((l) => {
+    const sellerUserId = sellerByServiceId.get(l.serviceId.toString());
+    if (!sellerUserId) {
+      throw new OrdersHttpError(500, "Could not resolve listing owners for checkout.");
+    }
+    return {
+      serviceId: l.serviceId,
+      sellerUserId,
+      title: l.title,
+      unitPriceNgn: l.unitPriceNgn,
+      quantity: l.quantity,
+      lineTotalNgn: l.lineTotalNgn,
+      categoryName: l.categoryName,
+      categorySlug: l.categorySlug,
+      departmentName: l.departmentName,
+    };
+  });
 
   let createdOrderId: mongoose.Types.ObjectId | null = null;
   let walletApplied: AppliedWalletCredit[] = [];
@@ -249,6 +280,7 @@ export async function simulatePaystackCheckout(
       subtotalNgn,
       lines: orderLines.map((l) => ({
         serviceId: l.serviceId,
+        sellerUserId: l.sellerUserId,
         title: l.title,
         unitPriceNgn: l.unitPriceNgn,
         quantity: l.quantity,
@@ -301,6 +333,7 @@ export type ReceiptSummaryDto = {
 
 export type ReceiptLineDto = {
   serviceId: string;
+  sellerUserId?: string;
   title: string;
   unitPriceNgn: number;
   quantity: number;
@@ -364,22 +397,25 @@ export async function getMyReceiptByOrderId(
     receiptNumber: doc.receiptNumber,
     currency: doc.currency,
     subtotalNgn: doc.subtotalNgn,
-    lines: lines.map((l) => ({
-      serviceId: (l.serviceId as mongoose.Types.ObjectId).toString(),
-      title: l.title,
-      unitPriceNgn: l.unitPriceNgn,
-      quantity: l.quantity,
-      lineTotalNgn: l.lineTotalNgn,
-      categoryName: l.categoryName,
-      departmentName: l.departmentName,
-    })),
+    lines: lines.map((l) => {
+      const sid = l.serviceId as mongoose.Types.ObjectId;
+      const sellerUid = l.sellerUserId as mongoose.Types.ObjectId | undefined;
+      return {
+        serviceId: sid.toString(),
+        ...(sellerUid ? { sellerUserId: sellerUid.toString() } : {}),
+        title: l.title,
+        unitPriceNgn: l.unitPriceNgn,
+        quantity: l.quantity,
+        lineTotalNgn: l.lineTotalNgn,
+        categoryName: l.categoryName,
+        departmentName: l.departmentName,
+      };
+    }),
     paymentProvider: doc.paymentProvider,
     paystackReference: doc.paystackReference,
     issuedAt: (doc.issuedAt as Date).toISOString(),
   };
 }
-
-const PROVIDER_SALES_CHART_MONTHS = 8;
 
 export type ProviderSalesMonthBucket = {
   yearMonth: string;
@@ -387,16 +423,10 @@ export type ProviderSalesMonthBucket = {
   totalNgn: number;
 };
 
-function utcYearMonth(d: Date): string {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function rollingYearMonthsUtc(count: number): string[] {
+function calendarYearMonthsUtc(year: number): string[] {
   const out: string[] = [];
-  const now = new Date();
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    out.push(utcYearMonth(d));
+  for (let m = 1; m <= 12; m++) {
+    out.push(`${year}-${String(m).padStart(2, "0")}`);
   }
   return out;
 }
@@ -415,17 +445,23 @@ function shortMonthLabelUtc(yearMonth: string): string {
 }
 
 /**
- * Sums order line totals (NGN) per calendar month (UTC) for lines whose service
- * is owned by the given provider.
+ * For a calendar year (UTC), sums each qualifying order's `subtotalNgn` by
+ * `paidAt` month. An order qualifies if any line has `sellerUserId` = provider
+ * or `serviceId` is one of the provider's current listings ($elemMatch, no $expr).
  */
 export async function getProviderSalesByMonth(
   providerUserId: string,
+  year: number,
 ): Promise<ProviderSalesMonthBucket[]> {
   const trimmed = providerUserId?.trim() ?? "";
-  const buckets = rollingYearMonthsUtc(PROVIDER_SALES_CHART_MONTHS);
-  const oldestYm = buckets[0];
-  if (!oldestYm) {
-    return [];
+  const buckets = calendarYearMonthsUtc(year);
+
+  if (!Number.isFinite(year) || year < 2000 || year > 2100) {
+    return buckets.map((ym) => ({
+      yearMonth: ym,
+      label: shortMonthLabelUtc(ym),
+      totalNgn: 0,
+    }));
   }
 
   if (!mongoose.Types.ObjectId.isValid(trimmed)) {
@@ -439,30 +475,59 @@ export async function getProviderSalesByMonth(
   const providerOid = new mongoose.Types.ObjectId(trimmed);
   const serviceIds = await Service.find({ userId: providerOid }).distinct("_id");
 
-  const [oy, om] = oldestYm.split("-").map((s) => parseInt(s, 10));
-  const rangeStart = new Date(Date.UTC(oy, om - 1, 1, 0, 0, 0, 0));
+  const rangeStart = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+  const rangeEndExclusive = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0));
 
-  if (serviceIds.length === 0) {
-    return buckets.map((ym) => ({
-      yearMonth: ym,
-      label: shortMonthLabelUtc(ym),
-      totalNgn: 0,
-    }));
-  }
+  const sellerLineMatch = { lines: { $elemMatch: { sellerUserId: providerOid } } };
+  const listingLineMatch =
+    serviceIds.length > 0
+      ? { lines: { $elemMatch: { serviceId: { $in: serviceIds } } } }
+      : null;
+  const sellerUserIdStringMatch = {
+    $expr: {
+      $gt: [
+        {
+          $size: {
+            $filter: {
+              input: "$lines",
+              as: "ln",
+              cond: {
+                $eq: [
+                  { $toString: { $ifNull: ["$$ln.sellerUserId", ""] } },
+                  providerOid.toString(),
+                ],
+              },
+            },
+          },
+        },
+        0,
+      ],
+    },
+  };
+
+  const orderQualifyOr: object[] = [
+    sellerLineMatch,
+    sellerUserIdStringMatch,
+    ...(listingLineMatch !== null ? [listingLineMatch] : []),
+  ];
+  const orderQualifyMatch = { $or: orderQualifyOr };
 
   const agg = await Order.aggregate<{
     _id: string;
     totalNgn: number;
   }>([
-    { $match: { paidAt: { $gte: rangeStart } } },
-    { $unwind: "$lines" },
-    { $match: { "lines.serviceId": { $in: serviceIds } } },
+    {
+      $match: {
+        paidAt: { $gte: rangeStart, $lt: rangeEndExclusive },
+      },
+    },
+    { $match: orderQualifyMatch },
     {
       $group: {
         _id: {
           $dateToString: { format: "%Y-%m", date: "$paidAt", timezone: "UTC" },
         },
-        totalNgn: { $sum: "$lines.lineTotalNgn" },
+        totalNgn: { $sum: "$subtotalNgn" },
       },
     },
   ]);

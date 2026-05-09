@@ -41,11 +41,11 @@ exports.SERVICE_CATEGORY_CATALOG = [
         ],
     },
     {
-        name: "Ambulance servicing",
+        name: "Ambulance sales and servicing",
         slug: "ambulance-servicing",
         departments: [
             { name: "Ambulance Sales", slug: "ambulance-sales" },
-            { name: "Ambulance Maintenance", slug: "ambulance-maintenance" },
+            { name: "Ambulance servicing", slug: "ambulance-servicing" },
         ],
     },
     {

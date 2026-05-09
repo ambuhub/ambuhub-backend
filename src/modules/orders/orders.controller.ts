@@ -44,8 +44,17 @@ export async function getProviderSalesByMonthHandler(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const months = await getProviderSalesByMonth(req.auth.userId);
-    res.status(200).json({ months });
+    const defaultYear = new Date().getUTCFullYear();
+    let year = defaultYear;
+    const rawYear = req.query.year;
+    if (typeof rawYear === "string" && /^\d{4}$/.test(rawYear)) {
+      const y = parseInt(rawYear, 10);
+      if (y >= 2000 && y <= 2100) {
+        year = y;
+      }
+    }
+    const months = await getProviderSalesByMonth(req.auth.userId, year);
+    res.status(200).json({ year, months });
   } catch (err: unknown) {
     if (err instanceof OrdersHttpError) {
       res.status(err.statusCode).json({ message: err.message });

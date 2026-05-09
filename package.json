@@ -10,7 +10,11 @@
     "build:clean": "rm -rf dist && tsc",
     "start": "node dist/index.js",
     "migrate:country-codes": "ts-node --transpile-only src/scripts/migrate-country-to-alpha2.ts",
-    "migrate:patient-to-client": "ts-node --transpile-only src/scripts/migrate-patient-role-to-client.ts"
+    "migrate:patient-to-client": "ts-node --transpile-only src/scripts/migrate-patient-role-to-client.ts",
+    "migrate:order-line-seller-user-id": "ts-node --transpile-only src/scripts/migrate-order-line-seller-user-id.ts",
+    "migrate:listing-types-sale-hire-book": "ts-node --transpile-only src/scripts/migrate-listing-types-sale-hire-book.ts",
+    "migrate:dept-ambulance-maintenance-to-servicing": "ts-node --transpile-only src/scripts/migrate-department-ambulance-maintenance-to-servicing.ts",
+    "seed:orders-2026-provider": "ts-node --transpile-only src/scripts/seed-provider-orders-2026.ts"
   },
   "keywords": [
     "Ambulance",
