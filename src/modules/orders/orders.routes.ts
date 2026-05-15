@@ -3,6 +3,7 @@ import { authenticate, requireServiceProvider } from "../../shared/middlewares/a
 import {
   getMyOrderHandler,
   getMyReceiptByOrderHandler,
+  getProviderHireBookingsHandler,
   getProviderSalesByMonthHandler,
   listMyOrdersHandler,
   listMyReceiptsHandler,
@@ -23,6 +24,12 @@ router.get(
   authenticate,
   requireServiceProvider,
   getProviderSalesByMonthHandler,
+);
+router.get(
+  "/provider/hire-bookings",
+  authenticate,
+  requireServiceProvider,
+  getProviderHireBookingsHandler,
 );
 router.get("/me", authenticate, listMyOrdersHandler);
 router.get("/me/:orderId", authenticate, getMyOrderHandler);

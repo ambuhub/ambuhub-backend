@@ -6,6 +6,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Service = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const listingTypeValues = ["sale", "hire", "book"];
+const pricingPeriodValues = [
+    "hourly",
+    "daily",
+    "weekly",
+    "monthly",
+    "yearly",
+];
 const serviceSchema = new mongoose_1.default.Schema({
     title: { type: String, required: true, trim: true },
     userId: {
@@ -35,9 +42,15 @@ const serviceSchema = new mongoose_1.default.Schema({
         default: null,
         min: 0,
     },
+    pricingPeriod: {
+        type: String,
+        enum: [...pricingPeriodValues],
+        default: null,
+    },
     departmentSlug: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
     photoUrls: { type: [String], default: [] },
+    isAvailable: { type: Boolean, default: true },
 }, { timestamps: true });
 serviceSchema.index({ userId: 1, createdAt: -1 });
 exports.Service = mongoose_1.default.model("Service", serviceSchema, "services");

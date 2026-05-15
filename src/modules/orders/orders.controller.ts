@@ -7,6 +7,7 @@ import {
   getProviderSalesByMonth,
   listMyOrders,
   listMyReceipts,
+  listProviderHireBookings,
   OrdersHttpError,
   simulateHirePaystackCheckout,
   simulatePaystackCheckout,
@@ -53,6 +54,26 @@ export async function postHireSimulateCheckoutHandler(
       return;
     }
     if (err instanceof CartHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getProviderHireBookingsHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const bookings = await listProviderHireBookings(req.auth.userId);
+    res.status(200).json({ bookings });
+  } catch (err: unknown) {
+    if (err instanceof OrdersHttpError) {
       res.status(err.statusCode).json({ message: err.message });
       return;
     }

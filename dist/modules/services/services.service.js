@@ -5,14 +5,23 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ServicesHttpError = void 0;
 exports.listMarketplaceServices = listMarketplaceServices;
+exports.getMarketplaceServiceById = getMarketplaceServiceById;
 exports.listMyServices = listMyServices;
 exports.getMyServiceById = getMyServiceById;
 exports.deleteService = deleteService;
 exports.createService = createService;
 exports.updateService = updateService;
+exports.setServiceAvailability = setServiceAvailability;
 const mongoose_1 = __importDefault(require("mongoose"));
 const service_model_1 = require("../../models/service.model");
 const serviceCategory_model_1 = require("../../models/serviceCategory.model");
+const PRICING_PERIODS = new Set([
+    "hourly",
+    "daily",
+    "weekly",
+    "monthly",
+    "yearly",
+]);
 const PERSONNEL_CATEGORY_SLUG = "personnel";
 const AMBULANCE_SERVICING_CATEGORY_SLUG = "ambulance-servicing";
 const BOOK_LISTING_TYPE_CATEGORY_SLUGS = new Set([
@@ -49,6 +58,10 @@ function mapLeanServiceToDto(doc) {
             departmentName = dept.name;
         }
     }
+    const rawPeriod = doc.pricingPeriod;
+    const pricingPeriod = typeof rawPeriod === "string" && PRICING_PERIODS.has(rawPeriod)
+        ? rawPeriod
+        : null;
     return {
         id: doc._id.toString(),
         title: doc.title,
@@ -56,6 +69,8 @@ function mapLeanServiceToDto(doc) {
         listingType: doc.listingType ?? null,
         stock: typeof doc.stock === "number" ? doc.stock : null,
         price: typeof doc.price === "number" ? doc.price : null,
+        pricingPeriod,
+        isAvailable: doc.isAvailable !== false,
         departmentSlug: doc.departmentSlug,
         departmentName,
         category,
@@ -65,6 +80,10 @@ function mapLeanServiceToDto(doc) {
     };
 }
 const MARKETPLACE_LISTING_CAP = 200;
+/** Legacy documents may omit isAvailable; treat as listed. */
+const MARKETPLACE_AVAILABLE_FILTER = {
+    $or: [{ isAvailable: true }, { isAvailable: { $exists: false } }],
+};
 async function listMarketplaceServices(categorySlug) {
     let query = {};
     let bannerUrl = null;
@@ -82,7 +101,12 @@ async function listMarketplaceServices(categorySlug) {
             typeof rawBanner === "string" && rawBanner.trim() !== ""
                 ? rawBanner.trim()
                 : null;
-        query = { serviceCategoryId: category._id };
+        query = {
+            $and: [{ serviceCategoryId: category._id }, MARKETPLACE_AVAILABLE_FILTER],
+        };
+    }
+    else {
+        query = { ...MARKETPLACE_AVAILABLE_FILTER };
     }
     const rows = await service_model_1.Service.find(query)
         .populate("serviceCategoryId", "name slug departments")
@@ -93,6 +117,25 @@ async function listMarketplaceServices(categorySlug) {
         services: rows.map((doc) => mapLeanServiceToDto(doc)),
         bannerUrl,
     };
+}
+async function getMarketplaceServiceById(serviceId) {
+    const trimmed = serviceId?.trim() ?? "";
+    if (!trimmed || !mongoose_1.default.Types.ObjectId.isValid(trimmed)) {
+        throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+    }
+    const doc = await service_model_1.Service.findOne({
+        _id: new mongoose_1.default.Types.ObjectId(trimmed),
+        $or: [
+            { isAvailable: true },
+            { isAvailable: { $exists: false } },
+        ],
+    })
+        .populate("serviceCategoryId", "name slug departments")
+        .lean();
+    if (!doc) {
+        throw new ServicesHttpError(404, "Service not found");
+    }
+    return mapLeanServiceToDto(doc);
 }
 async function listMyServices(userId) {
     const rows = await service_model_1.Service.find({
@@ -133,7 +176,7 @@ async function deleteService(userId, serviceId) {
     }
 }
 function normalizeAndValidateServiceInput(categorySlug, input) {
-    const { title, description, departmentSlug, listingType, stock, price, photoUrls = [], } = input;
+    const { title, description, departmentSlug, listingType, stock, price, pricingPeriod, photoUrls = [], } = input;
     if (!title?.trim() ||
         !description?.trim() ||
         !departmentSlug?.trim()) {
@@ -186,8 +229,10 @@ function normalizeAndValidateServiceInput(categorySlug, input) {
     if (effectiveListingType === "sale" && normalizedStock === null) {
         throw new ServicesHttpError(400, "stock is required when listingType is 'sale'");
     }
-    if (effectiveListingType !== "sale" && normalizedStock !== null) {
-        throw new ServicesHttpError(400, "stock must be null unless listingType is 'sale'");
+    if (effectiveListingType !== "sale" &&
+        effectiveListingType !== "hire" &&
+        normalizedStock !== null) {
+        throw new ServicesHttpError(400, "stock must be null unless listingType is 'sale' or 'hire'");
     }
     const normalizedPrice = (() => {
         if (price === null || price === undefined) {
@@ -204,8 +249,34 @@ function normalizeAndValidateServiceInput(categorySlug, input) {
     if (effectiveListingType === "sale" && normalizedPrice === null) {
         throw new ServicesHttpError(400, "price is required when listingType is 'sale'");
     }
-    if (effectiveListingType !== "sale" && normalizedPrice !== null) {
-        throw new ServicesHttpError(400, "price must be null unless listingType is 'sale'");
+    if (effectiveListingType !== "sale" &&
+        effectiveListingType !== "hire" &&
+        normalizedPrice !== null) {
+        throw new ServicesHttpError(400, "price must be null unless listingType is 'sale' or 'hire'");
+    }
+    const normalizedPricingPeriod = (() => {
+        if (pricingPeriod === null || pricingPeriod === undefined) {
+            return null;
+        }
+        if (typeof pricingPeriod !== "string") {
+            throw new ServicesHttpError(400, "pricingPeriod must be a string");
+        }
+        const trimmed = pricingPeriod.trim();
+        if (trimmed === "") {
+            return null;
+        }
+        if (!PRICING_PERIODS.has(trimmed)) {
+            throw new ServicesHttpError(400, "pricingPeriod must be one of: hourly, daily, weekly, monthly, yearly");
+        }
+        return trimmed;
+    })();
+    if (effectiveListingType === "hire") {
+        if (normalizedPricingPeriod === null) {
+            throw new ServicesHttpError(400, "pricingPeriod is required when listingType is 'hire'");
+        }
+    }
+    else if (normalizedPricingPeriod !== null) {
+        throw new ServicesHttpError(400, "pricingPeriod must be null unless listingType is 'hire'");
     }
     const normalizedUrls = Array.isArray(photoUrls)
         ? photoUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
@@ -217,6 +288,7 @@ function normalizeAndValidateServiceInput(categorySlug, input) {
         listingType: effectiveListingType,
         stock: normalizedStock,
         price: normalizedPrice,
+        pricingPeriod: normalizedPricingPeriod,
         photoUrls: normalizedUrls,
     };
 }
@@ -243,8 +315,10 @@ async function createService(userId, input) {
         listingType: normalized.listingType,
         stock: normalized.stock,
         price: normalized.price,
+        pricingPeriod: normalized.pricingPeriod,
         departmentSlug: normalized.departmentSlug,
         photoUrls: normalized.photoUrls,
+        isAvailable: true,
     });
     return doc.toObject();
 }
@@ -284,8 +358,36 @@ async function updateService(userId, input) {
         listingType: normalized.listingType,
         stock: normalized.stock,
         price: normalized.price,
+        pricingPeriod: normalized.pricingPeriod,
         photoUrls: normalized.photoUrls,
     }, { new: true }).lean();
+    if (!updated) {
+        throw new ServicesHttpError(404, "Service not found");
+    }
+    const repopulated = await service_model_1.Service.findById(updated._id)
+        .populate("serviceCategoryId", "name slug departments")
+        .lean();
+    if (!repopulated) {
+        throw new ServicesHttpError(404, "Service not found");
+    }
+    return mapLeanServiceToDto(repopulated);
+}
+async function setServiceAvailability(userId, serviceId, isAvailable) {
+    const trimmed = serviceId?.trim() ?? "";
+    if (!trimmed || !mongoose_1.default.Types.ObjectId.isValid(trimmed)) {
+        throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
+    }
+    if (typeof isAvailable !== "boolean") {
+        throw new ServicesHttpError(400, "isAvailable must be a boolean");
+    }
+    const service = await service_model_1.Service.findById(trimmed).lean();
+    if (!service) {
+        throw new ServicesHttpError(404, "Service not found");
+    }
+    if (service.userId.toString() !== userId) {
+        throw new ServicesHttpError(403, "You can only update services you created");
+    }
+    const updated = await service_model_1.Service.findByIdAndUpdate(service._id, { isAvailable }, { new: true }).lean();
     if (!updated) {
         throw new ServicesHttpError(404, "Service not found");
     }

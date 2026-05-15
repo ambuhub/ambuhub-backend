@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Order = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
+const pricingPeriodValues = ["hourly", "daily", "weekly", "monthly", "yearly"];
+const lineKindValues = ["sale", "hire"];
 const orderLineSchema = new mongoose_1.default.Schema({
     serviceId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
@@ -17,6 +19,11 @@ const orderLineSchema = new mongoose_1.default.Schema({
         ref: "User",
         required: false,
     },
+    lineKind: {
+        type: String,
+        enum: lineKindValues,
+        required: false,
+    },
     title: { type: String, required: true },
     unitPriceNgn: { type: Number, required: true, min: 0 },
     quantity: { type: Number, required: true, min: 1 },
@@ -24,6 +31,14 @@ const orderLineSchema = new mongoose_1.default.Schema({
     categoryName: { type: String, required: true },
     categorySlug: { type: String, required: true },
     departmentName: { type: String, required: true },
+    hireStart: { type: Date, required: false },
+    hireEnd: { type: Date, required: false },
+    pricingPeriod: {
+        type: String,
+        enum: [...pricingPeriodValues],
+        required: false,
+    },
+    hireBillableUnits: { type: Number, required: false, min: 1 },
 }, { _id: false });
 const orderSchema = new mongoose_1.default.Schema({
     userId: {

@@ -1,11 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMarketplaceServices = getMarketplaceServices;
+exports.getMarketplaceServiceByIdHandler = getMarketplaceServiceByIdHandler;
 exports.getMyServices = getMyServices;
 exports.getMyServiceByIdHandler = getMyServiceByIdHandler;
 exports.deleteMyService = deleteMyService;
 exports.postCreateService = postCreateService;
 exports.putUpdateService = putUpdateService;
+exports.patchServiceAvailability = patchServiceAvailability;
 const services_service_1 = require("./services.service");
 function parseServicePayload(body) {
     const photoUrls = Array.isArray(body.photoUrls)
@@ -33,6 +35,12 @@ function parseServicePayload(body) {
             : typeof priceRaw === "string"
                 ? Number(priceRaw)
                 : undefined;
+    const pricingPeriodRaw = body.pricingPeriod;
+    const pricingPeriod = pricingPeriodRaw === null || pricingPeriodRaw === undefined
+        ? null
+        : typeof pricingPeriodRaw === "string"
+            ? pricingPeriodRaw
+            : undefined;
     return {
         title: String(body.title ?? ""),
         description: String(body.description ?? ""),
@@ -41,6 +49,7 @@ function parseServicePayload(body) {
         listingType,
         stock,
         price,
+        pricingPeriod,
         photoUrls,
     };
 }
@@ -62,6 +71,20 @@ async function getMarketplaceServices(req, res) {
         }
         const { services, bannerUrl } = await (0, services_service_1.listMarketplaceServices)(categorySlug);
         res.status(200).json({ services, bannerUrl });
+    }
+    catch (err) {
+        if (err instanceof services_service_1.ServicesHttpError) {
+            res.status(err.statusCode).json({ message: err.message });
+            return;
+        }
+        throw err;
+    }
+}
+async function getMarketplaceServiceByIdHandler(req, res) {
+    try {
+        const serviceId = typeof req.params.serviceId === "string" ? req.params.serviceId : "";
+        const service = await (0, services_service_1.getMarketplaceServiceById)(serviceId);
+        res.status(200).json({ service });
     }
     catch (err) {
         if (err instanceof services_service_1.ServicesHttpError) {
@@ -142,6 +165,7 @@ async function postCreateService(req, res) {
             listingType: payload.listingType,
             stock: payload.stock,
             price: payload.price,
+            pricingPeriod: payload.pricingPeriod,
             photoUrls: payload.photoUrls,
         });
         res.status(201).json({ service });
@@ -173,8 +197,34 @@ async function putUpdateService(req, res) {
             listingType: payload.listingType,
             stock: payload.stock,
             price: payload.price,
+            pricingPeriod: payload.pricingPeriod,
             photoUrls: payload.photoUrls,
         });
+        res.status(200).json({ service });
+    }
+    catch (err) {
+        if (err instanceof services_service_1.ServicesHttpError) {
+            res.status(err.statusCode).json({ message: err.message });
+            return;
+        }
+        throw err;
+    }
+}
+async function patchServiceAvailability(req, res) {
+    try {
+        if (!req.auth) {
+            res.status(401).json({ message: "Unauthorized" });
+            return;
+        }
+        const rawId = req.params.id;
+        const serviceId = typeof rawId === "string" ? rawId : "";
+        const body = req.body;
+        const raw = body.isAvailable;
+        if (raw !== true && raw !== false) {
+            res.status(400).json({ message: "isAvailable must be a boolean" });
+            return;
+        }
+        const service = await (0, services_service_1.setServiceAvailability)(req.auth.userId, serviceId, raw);
         res.status(200).json({ service });
     }
     catch (err) {

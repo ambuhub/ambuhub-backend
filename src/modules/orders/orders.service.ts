@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Order } from "../../models/order.model";
 import { Receipt } from "../../models/receipt.model";
 import { Service } from "../../models/service.model";
+import { User } from "../../models/user.model";
 import {
   CartHttpError,
   clearCart,
@@ -787,4 +788,192 @@ export async function getProviderSalesByMonth(
     label: shortMonthLabelUtc(ym),
     totalNgn: totals.get(ym) ?? 0,
   }));
+}
+
+/** Buyer contact exposed to listing owners for hire fulfillment (operational). */
+export type ProviderHireBookingCustomerDto = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+};
+
+export type ProviderHireBookingRowDto = {
+  orderId: string;
+  receiptNumber: string;
+  paidAt: string;
+  serviceId: string;
+  listingTitle: string;
+  hireStart: string;
+  hireEnd: string;
+  pricingPeriod: PricingPeriod;
+  hireBillableUnits: number;
+  quantity: number;
+  lineTotalNgn: number;
+  customer: ProviderHireBookingCustomerDto;
+};
+
+function hireLineBelongsToProvider(
+  line: {
+    sellerUserId?: mongoose.Types.ObjectId;
+    serviceId: mongoose.Types.ObjectId;
+  },
+  providerOid: mongoose.Types.ObjectId,
+  listingIdSet: Set<string>,
+): boolean {
+  const seller = line.sellerUserId;
+  if (seller && seller.equals(providerOid)) {
+    return true;
+  }
+  if (!seller && listingIdSet.has(line.serviceId.toString())) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Flattened hire bookings for the provider dashboard: one row per qualifying hire line.
+ * Rows sorted by hireEnd descending (most recent end date first).
+ */
+export async function listProviderHireBookings(
+  providerUserId: string,
+): Promise<ProviderHireBookingRowDto[]> {
+  const trimmed = providerUserId?.trim() ?? "";
+  if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new OrdersHttpError(400, "Invalid user id");
+  }
+
+  const providerOid = new mongoose.Types.ObjectId(trimmed);
+  const serviceDocs = await Service.find({ userId: providerOid }).select("_id").lean();
+  const serviceIds = serviceDocs.map((d) => d._id as mongoose.Types.ObjectId);
+  const listingIdSet = new Set(serviceIds.map((id) => id.toString()));
+
+  const elemMatch: Record<string, unknown> = {
+    lineKind: "hire",
+    $or: [{ sellerUserId: providerOid }],
+  };
+  if (serviceIds.length > 0) {
+    (elemMatch.$or as object[]).push({ serviceId: { $in: serviceIds } });
+  }
+
+  const orders = await Order.find({
+    lines: { $elemMatch: elemMatch },
+  })
+    .sort({ paidAt: -1 })
+    .limit(500)
+    .lean();
+
+  type OrderLineLean = {
+    lineKind?: string;
+    sellerUserId?: mongoose.Types.ObjectId;
+    serviceId: mongoose.Types.ObjectId;
+    title: string;
+    hireStart?: Date;
+    hireEnd?: Date;
+    pricingPeriod?: string;
+    hireBillableUnits?: number;
+    quantity: number;
+    lineTotalNgn: number;
+  };
+
+  const buyerIds = new Set<string>();
+  const candidateRows: {
+    orderId: mongoose.Types.ObjectId;
+    receiptNumber: string;
+    paidAt: Date;
+    buyerId: mongoose.Types.ObjectId;
+    line: OrderLineLean;
+  }[] = [];
+
+  for (const doc of orders) {
+    const lines = Array.isArray(doc.lines) ? (doc.lines as OrderLineLean[]) : [];
+    const buyerId = doc.userId as mongoose.Types.ObjectId;
+    for (const line of lines) {
+      if (line.lineKind !== "hire") {
+        continue;
+      }
+      if (!hireLineBelongsToProvider(line, providerOid, listingIdSet)) {
+        continue;
+      }
+      const hireEnd = line.hireEnd;
+      const hireStart = line.hireStart;
+      if (!hireEnd || !hireStart) {
+        continue;
+      }
+      buyerIds.add(buyerId.toString());
+      candidateRows.push({
+        orderId: doc._id as mongoose.Types.ObjectId,
+        receiptNumber: doc.receiptNumber as string,
+        paidAt: doc.paidAt as Date,
+        buyerId,
+        line,
+      });
+    }
+  }
+
+  const buyers = await User.find({
+    _id: { $in: [...buyerIds].map((id) => new mongoose.Types.ObjectId(id)) },
+  })
+    .select("firstName lastName email phone")
+    .lean();
+
+  const buyerById = new Map<string, ProviderHireBookingCustomerDto>();
+  for (const u of buyers) {
+    const id = (u._id as mongoose.Types.ObjectId).toString();
+    buyerById.set(id, {
+      id,
+      firstName: typeof u.firstName === "string" ? u.firstName : "",
+      lastName: typeof u.lastName === "string" ? u.lastName : "",
+      email: typeof u.email === "string" ? u.email : "",
+      phone: typeof u.phone === "string" ? u.phone : "",
+    });
+  }
+
+  const defaultCustomer = (id: string): ProviderHireBookingCustomerDto => ({
+    id,
+    firstName: "Unknown",
+    lastName: "",
+    email: "",
+    phone: "",
+  });
+
+  const periodOrDaily = (raw: string | undefined): PricingPeriod => {
+    if (
+      raw === "hourly" ||
+      raw === "daily" ||
+      raw === "weekly" ||
+      raw === "monthly" ||
+      raw === "yearly"
+    ) {
+      return raw;
+    }
+    return "daily";
+  };
+
+  const rows: ProviderHireBookingRowDto[] = candidateRows.map((r) => {
+    const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
+    const bu =
+      typeof r.line.hireBillableUnits === "number" && r.line.hireBillableUnits >= 1
+        ? r.line.hireBillableUnits
+        : 1;
+    return {
+      orderId: r.orderId.toString(),
+      receiptNumber: r.receiptNumber,
+      paidAt: r.paidAt.toISOString(),
+      serviceId: r.line.serviceId.toString(),
+      listingTitle: r.line.title,
+      hireStart: r.line.hireStart!.toISOString(),
+      hireEnd: r.line.hireEnd!.toISOString(),
+      pricingPeriod: periodOrDaily(r.line.pricingPeriod),
+      hireBillableUnits: bu,
+      quantity: r.line.quantity,
+      lineTotalNgn: r.line.lineTotalNgn,
+      customer,
+    };
+  });
+
+  rows.sort((a, b) => new Date(b.hireEnd).getTime() - new Date(a.hireEnd).getTime());
+
+  return rows;
 }

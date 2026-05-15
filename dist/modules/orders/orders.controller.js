@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.postSimulateCheckoutHandler = postSimulateCheckoutHandler;
+exports.postHireSimulateCheckoutHandler = postHireSimulateCheckoutHandler;
+exports.getProviderHireBookingsHandler = getProviderHireBookingsHandler;
 exports.getProviderSalesByMonthHandler = getProviderSalesByMonthHandler;
 exports.listMyOrdersHandler = listMyOrdersHandler;
 exports.getMyOrderHandler = getMyOrderHandler;
@@ -23,6 +25,44 @@ async function postSimulateCheckoutHandler(req, res) {
             return;
         }
         if (err instanceof cart_service_1.CartHttpError) {
+            res.status(err.statusCode).json({ message: err.message });
+            return;
+        }
+        throw err;
+    }
+}
+async function postHireSimulateCheckoutHandler(req, res) {
+    try {
+        if (!req.auth) {
+            res.status(401).json({ message: "Unauthorized" });
+            return;
+        }
+        const result = await (0, orders_service_1.simulateHirePaystackCheckout)(req.auth.userId, req.body ?? {});
+        res.status(201).json(result);
+    }
+    catch (err) {
+        if (err instanceof orders_service_1.OrdersHttpError) {
+            res.status(err.statusCode).json({ message: err.message });
+            return;
+        }
+        if (err instanceof cart_service_1.CartHttpError) {
+            res.status(err.statusCode).json({ message: err.message });
+            return;
+        }
+        throw err;
+    }
+}
+async function getProviderHireBookingsHandler(req, res) {
+    try {
+        if (!req.auth) {
+            res.status(401).json({ message: "Unauthorized" });
+            return;
+        }
+        const bookings = await (0, orders_service_1.listProviderHireBookings)(req.auth.userId);
+        res.status(200).json({ bookings });
+    }
+    catch (err) {
+        if (err instanceof orders_service_1.OrdersHttpError) {
             res.status(err.statusCode).json({ message: err.message });
             return;
         }
