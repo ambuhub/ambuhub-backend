@@ -2,6 +2,12 @@ import path from "path";
 import swaggerJsdoc from "swagger-jsdoc";
 
 const port = process.env.PORT || "3002";
+const serverUrl = process.env.BACKEND_URL || `http://localhost:${port}`;
+const isLocalServer =
+  serverUrl.includes("localhost") || serverUrl.includes("127.0.0.1");
+
+/** `.ts` when run via ts-node-dev; `.js` when run from `dist/` on Render. */
+const docExt = __filename.endsWith(".ts") ? "ts" : "js";
 
 const options: swaggerJsdoc.Options = {
   definition: {
@@ -14,15 +20,15 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        url: process.env.BACKEND_URL || `http://localhost:${port}`, 
-        description: "Local development",
+        url: serverUrl,
+        description: isLocalServer ? "Local development" : "Production",
       },
     ],
   },
   apis: [
-    path.join(__dirname, "../swagger/components.ts"),
-    path.join(__dirname, "../swagger/responses.ts"),
-    path.join(__dirname, "../swagger/paths/*.ts"),
+    path.join(__dirname, `../swagger/components.${docExt}`),
+    path.join(__dirname, `../swagger/responses.${docExt}`),
+    path.join(__dirname, `../swagger/paths/*.${docExt}`),
   ],
 };
 
