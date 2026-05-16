@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Cart } from "../../models/cart.model";
 import { Service } from "../../models/service.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
+import { parseBookingWindowFromDoc } from "../../shared/lib/bookingWindow";
 import type { ListingType, PricingPeriod } from "../services/services.service";
 
 const HIRE_PRICING_PERIODS = new Set<PricingPeriod>([
@@ -40,6 +41,9 @@ type LeanServiceForCart = {
   isAvailable?: boolean | null;
   departmentSlug: string;
   photoUrls: unknown;
+  hireReturnWindow?: unknown;
+  bookingWindow?: unknown;
+  bookingGapMinutes?: number | null;
   serviceCategoryId: PopulatedCategory | null;
 };
 
@@ -201,6 +205,76 @@ export async function loadHireServiceForCheckout(
   }
 
   return { ...lean, pricingPeriod };
+}
+
+export async function loadBookServiceForCheckout(
+  serviceId: string,
+  buyerUserId: string,
+): Promise<
+  LeanServiceForCart & {
+    pricingPeriod: PricingPeriod;
+    bookingWindow: NonNullable<ReturnType<typeof parseBookingWindowFromDoc>>;
+    bookingGapMinutes: number;
+  }
+> {
+  const trimmed = serviceId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new CartHttpError(400, "serviceId must be a valid ObjectId");
+  }
+
+  const doc = await Service.findById(trimmed)
+    .populate<{ serviceCategoryId: PopulatedCategory | null }>(
+      "serviceCategoryId",
+      "name slug departments",
+    )
+    .lean();
+
+  if (!doc) {
+    throw new CartHttpError(404, "Service not found");
+  }
+
+  const lean = doc as LeanServiceForCart;
+  if (lean.userId.toString() === buyerUserId) {
+    throw new CartHttpError(400, "You cannot book your own listing");
+  }
+
+  if (lean.listingType !== "book") {
+    throw new CartHttpError(400, "Only book listings can be booked this way");
+  }
+
+  if (lean.isAvailable === false) {
+    throw new CartHttpError(400, "This listing is not available");
+  }
+
+  const price = typeof lean.price === "number" ? lean.price : null;
+  const rawPeriod = lean.pricingPeriod;
+  const pricingPeriod: PricingPeriod | null =
+    typeof rawPeriod === "string" && HIRE_PRICING_PERIODS.has(rawPeriod as PricingPeriod)
+      ? (rawPeriod as PricingPeriod)
+      : null;
+
+  if (price === null || price < 0) {
+    throw new CartHttpError(400, "This listing does not have a valid booking price");
+  }
+
+  if (pricingPeriod === null) {
+    throw new CartHttpError(400, "This listing does not have a valid pricing period");
+  }
+
+  const bookingWindow = parseBookingWindowFromDoc(lean.bookingWindow);
+  if (!bookingWindow) {
+    throw new CartHttpError(
+      400,
+      "This listing has no booking schedule. Booking is unavailable until the provider updates it.",
+    );
+  }
+
+  const bookingGapMinutes =
+    typeof lean.bookingGapMinutes === "number" && lean.bookingGapMinutes >= 0
+      ? lean.bookingGapMinutes
+      : 0;
+
+  return { ...lean, pricingPeriod, bookingWindow, bookingGapMinutes };
 }
 
 export async function getCart(userId: string): Promise<CartDto> {

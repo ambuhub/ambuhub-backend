@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 const pricingPeriodValues = ["hourly", "daily", "weekly", "monthly", "yearly"] as const;
-const lineKindValues = ["sale", "hire"] as const;
+const lineKindValues = ["sale", "hire", "book"] as const;
 
 /**
  * Immutable receipt snapshot tied to a paid order.
@@ -39,6 +39,9 @@ const receiptLineSchema = new mongoose.Schema(
       required: false,
     },
     hireBillableUnits: { type: Number, required: false, min: 1 },
+    bookStart: { type: Date, required: false },
+    bookEnd: { type: Date, required: false },
+    bookBillableUnits: { type: Number, required: false, min: 1 },
   },
   { _id: false },
 );

@@ -15,7 +15,9 @@
     "migrate:listing-types-sale-hire-book": "ts-node --transpile-only src/scripts/migrate-listing-types-sale-hire-book.ts",
     "migrate:dept-ambulance-maintenance-to-servicing": "ts-node --transpile-only src/scripts/migrate-department-ambulance-maintenance-to-servicing.ts",
     "seed:orders-2026-provider": "ts-node --transpile-only src/scripts/seed-provider-orders-2026.ts",
-    "migrate:hire-stock-pricing": "ts-node --transpile-only src/scripts/migrate-hire-stock-and-pricing-by-category.ts"
+    "migrate:hire-stock-pricing": "ts-node --transpile-only src/scripts/migrate-hire-stock-and-pricing-by-category.ts",
+    "migrate:hire-location-return": "ts-node --transpile-only src/scripts/migrate-hire-location-and-return-window.ts",
+    "backfill:hire-return-notification-schedules": "ts-node --transpile-only src/scripts/backfill-hire-return-notification-schedules.ts"
   },
   "keywords": [
     "Ambulance",
@@ -29,6 +31,7 @@
     "cloudinary": "^2.9.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
+    "country-state-city": "^3.2.1",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",

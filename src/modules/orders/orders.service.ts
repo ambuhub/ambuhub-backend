@@ -8,18 +8,30 @@ import {
   clearCart,
   generateSimulatedPaystackReference,
   generateUniqueReceiptNumber,
+  loadBookServiceForCheckout,
   loadHireServiceForCheckout,
   mapServiceToLineMeta,
   resolveCartForCheckout,
   type CartCheckoutLine,
 } from "../cart/cart.service";
+import {
+  assertHireEndAllowed,
+  parseHireReturnWindowFromDoc,
+  resolveCanonicalHireEnd,
+} from "../../shared/lib/hireReturnWindow";
 import type { PricingPeriod } from "../services/services.service";
+import { assertBookRangeAvailable } from "../../shared/lib/booking-availability";
 import { computeHireBillableUnits, parseHireInstantRange } from "./hire-pricing";
 import {
   creditSellersForCheckoutLines,
   rollbackSellerCredits,
   type AppliedWalletCredit,
 } from "../wallet/wallet.service";
+import {
+  notifyProvidersOnOrderPaid,
+  scheduleHireReturnReminders,
+  scheduleProviderHireReturnReminders,
+} from "../notifications/notifications.service";
 
 export class OrdersHttpError extends Error {
   constructor(
@@ -35,7 +47,7 @@ export type OrderLineDto = {
   serviceId: string;
   /** Present on orders created after seller snapshot was added. */
   sellerUserId?: string;
-  lineKind?: "sale" | "hire";
+  lineKind?: "sale" | "hire" | "book";
   title: string;
   unitPriceNgn: number;
   quantity: number;
@@ -45,8 +57,11 @@ export type OrderLineDto = {
   departmentName: string;
   hireStart?: string;
   hireEnd?: string;
+  bookStart?: string;
+  bookEnd?: string;
   pricingPeriod?: PricingPeriod;
   hireBillableUnits?: number;
+  bookBillableUnits?: number;
 };
 
 export type OrderSummaryDto = {
@@ -100,7 +115,7 @@ function mapOrderDetail(doc: {
   lines: {
     serviceId: mongoose.Types.ObjectId;
     sellerUserId?: mongoose.Types.ObjectId;
-    lineKind?: "sale" | "hire";
+    lineKind?: "sale" | "hire" | "book";
     title: string;
     unitPriceNgn: number;
     quantity: number;
@@ -110,8 +125,11 @@ function mapOrderDetail(doc: {
     departmentName: string;
     hireStart?: Date;
     hireEnd?: Date;
+    bookStart?: Date;
+    bookEnd?: Date;
     pricingPeriod?: PricingPeriod;
     hireBillableUnits?: number;
+    bookBillableUnits?: number;
   }[];
   paymentProvider: string;
   paystackReference: string;
@@ -139,9 +157,14 @@ function mapOrderDetail(doc: {
       departmentName: l.departmentName,
       ...(l.hireStart ? { hireStart: l.hireStart.toISOString() } : {}),
       ...(l.hireEnd ? { hireEnd: l.hireEnd.toISOString() } : {}),
+      ...(l.bookStart ? { bookStart: l.bookStart.toISOString() } : {}),
+      ...(l.bookEnd ? { bookEnd: l.bookEnd.toISOString() } : {}),
       ...(l.pricingPeriod ? { pricingPeriod: l.pricingPeriod } : {}),
       ...(typeof l.hireBillableUnits === "number"
         ? { hireBillableUnits: l.hireBillableUnits }
+        : {}),
+      ...(typeof l.bookBillableUnits === "number"
+        ? { bookBillableUnits: l.bookBillableUnits }
         : {}),
     })),
     paymentProvider: doc.paymentProvider,
@@ -316,6 +339,13 @@ export async function simulatePaystackCheckout(
       issuedAt: paidAt,
     });
 
+    await notifyProvidersOnOrderPaid({
+      buyerUserId: userId,
+      orderId: orderDoc._id,
+      receiptNumber,
+      lines: orderLines,
+    });
+
     walletApplied = await creditSellersForCheckoutLines(lines);
 
     await clearCart(userId);
@@ -390,6 +420,18 @@ export async function simulateHirePaystackCheckout(
     range = parseHireInstantRange(pricingPeriod, hireStartRaw, hireEndRaw);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Invalid hire dates";
+    throw new OrdersHttpError(400, msg);
+  }
+
+  const returnWindow = parseHireReturnWindowFromDoc(svc.hireReturnWindow);
+  if (!returnWindow) {
+    throw new OrdersHttpError(400, "This listing has no return schedule");
+  }
+  try {
+    assertHireEndAllowed(range.end, returnWindow, pricingPeriod);
+    range.end = resolveCanonicalHireEnd(range.end, returnWindow, pricingPeriod);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Return time is not allowed";
     throw new OrdersHttpError(400, msg);
   }
 
@@ -517,6 +559,25 @@ export async function simulateHirePaystackCheckout(
       issuedAt: paidAt,
     });
 
+    await scheduleHireReturnReminders({
+      userId,
+      orderId: orderDoc._id,
+      lines: orderLines,
+    });
+
+    await notifyProvidersOnOrderPaid({
+      buyerUserId: userId,
+      orderId: orderDoc._id,
+      receiptNumber,
+      lines: orderLines,
+    });
+
+    await scheduleProviderHireReturnReminders({
+      sellerUserId: sellerUserId.toString(),
+      orderId: orderDoc._id,
+      lines: orderLines,
+    });
+
     walletApplied = await creditSellersForCheckoutLines([walletLine]);
 
     const detail = mapOrderDetail(orderDoc.toObject() as Parameters<typeof mapOrderDetail>[0]);
@@ -544,6 +605,206 @@ export async function simulateHirePaystackCheckout(
   }
 }
 
+export type BookSimulateCheckoutBody = {
+  serviceId: unknown;
+  bookStart: unknown;
+  bookEnd: unknown;
+};
+
+export async function simulateBookPaystackCheckout(
+  userId: string,
+  body: BookSimulateCheckoutBody,
+): Promise<SimulateCheckoutResult> {
+  const serviceId = typeof body.serviceId === "string" ? body.serviceId.trim() : "";
+  const bookStartRaw = typeof body.bookStart === "string" ? body.bookStart : "";
+  const bookEndRaw = typeof body.bookEnd === "string" ? body.bookEnd : "";
+
+  if (!serviceId) {
+    throw new OrdersHttpError(400, "serviceId is required");
+  }
+
+  let svc: Awaited<ReturnType<typeof loadBookServiceForCheckout>>;
+  try {
+    svc = await loadBookServiceForCheckout(serviceId, userId);
+  } catch (err) {
+    if (err instanceof CartHttpError) {
+      throw new OrdersHttpError(err.statusCode, err.message);
+    }
+    throw err;
+  }
+
+  const meta = mapServiceToLineMeta(svc);
+  const pricingPeriod = svc.pricingPeriod;
+  const unitPrice = typeof svc.price === "number" && svc.price >= 0 ? svc.price : 0;
+  const quantity = 1;
+
+  let range: { start: Date; end: Date };
+  try {
+    range = parseHireInstantRange(pricingPeriod, bookStartRaw, bookEndRaw);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Invalid booking dates";
+    throw new OrdersHttpError(400, msg);
+  }
+
+  try {
+    await assertBookRangeAvailable(
+      svc._id.toString(),
+      range.start,
+      range.end,
+      svc.bookingWindow,
+      svc.bookingGapMinutes,
+      pricingPeriod,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Booking time is not available";
+    const status = msg.includes("conflicts") ? 409 : 400;
+    throw new OrdersHttpError(status, msg);
+  }
+
+  let bookBillableUnits: number;
+  try {
+    bookBillableUnits = computeHireBillableUnits(pricingPeriod, range.start, range.end);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Invalid booking window";
+    throw new OrdersHttpError(400, msg);
+  }
+
+  if (bookBillableUnits < 1) {
+    throw new OrdersHttpError(400, "Booking must span at least one billable unit");
+  }
+
+  const lineTotalNgn = Math.round(unitPrice * quantity * bookBillableUnits);
+
+  const walletLine: CartCheckoutLine = {
+    serviceId: svc._id,
+    quantity,
+    title: meta.title,
+    unitPriceNgn: unitPrice,
+    lineTotalNgn,
+    categoryName: meta.category.name,
+    categorySlug: meta.category.slug,
+    departmentName: meta.departmentName,
+  };
+
+  const sellerUserId = svc.userId;
+
+  const orderLines = [
+    {
+      serviceId: svc._id,
+      sellerUserId,
+      lineKind: "book" as const,
+      title: meta.title,
+      unitPriceNgn: unitPrice,
+      quantity,
+      lineTotalNgn,
+      categoryName: meta.category.name,
+      categorySlug: meta.category.slug,
+      departmentName: meta.departmentName,
+      bookStart: range.start,
+      bookEnd: range.end,
+      pricingPeriod,
+      bookBillableUnits,
+    },
+  ];
+
+  const subtotalNgn = lineTotalNgn;
+  const receiptNumber = await generateUniqueReceiptNumber();
+  const paystackReference = generateSimulatedPaystackReference();
+  const paidAt = new Date();
+
+  let createdOrderId: mongoose.Types.ObjectId | null = null;
+  let walletApplied: AppliedWalletCredit[] = [];
+
+  const receiptLines = orderLines.map((l) => ({
+    serviceId: l.serviceId,
+    sellerUserId: l.sellerUserId,
+    lineKind: l.lineKind,
+    title: l.title,
+    unitPriceNgn: l.unitPriceNgn,
+    quantity: l.quantity,
+    lineTotalNgn: l.lineTotalNgn,
+    categoryName: l.categoryName,
+    departmentName: l.departmentName,
+    bookStart: l.bookStart,
+    bookEnd: l.bookEnd,
+    pricingPeriod: l.pricingPeriod,
+    bookBillableUnits: l.bookBillableUnits,
+  }));
+
+  try {
+    await assertBookRangeAvailable(
+      svc._id.toString(),
+      range.start,
+      range.end,
+      svc.bookingWindow,
+      svc.bookingGapMinutes,
+      pricingPeriod,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Booking time is no longer available";
+    throw new OrdersHttpError(409, msg);
+  }
+
+  try {
+    const orderDoc = await Order.create({
+      userId: new mongoose.Types.ObjectId(userId),
+      receiptNumber,
+      currency: "NGN",
+      subtotalNgn,
+      lines: orderLines,
+      paymentProvider: "paystack_simulated",
+      paystackReference,
+      paystackSimulated: true,
+      paidAt,
+    });
+    createdOrderId = orderDoc._id;
+
+    await Receipt.create({
+      orderId: orderDoc._id,
+      userId: new mongoose.Types.ObjectId(userId),
+      receiptNumber,
+      currency: "NGN",
+      subtotalNgn,
+      lines: receiptLines,
+      paymentProvider: "paystack_simulated",
+      paystackReference,
+      issuedAt: paidAt,
+    });
+
+    await notifyProvidersOnOrderPaid({
+      buyerUserId: userId,
+      orderId: orderDoc._id,
+      receiptNumber,
+      lines: orderLines,
+    });
+
+    walletApplied = await creditSellersForCheckoutLines([walletLine]);
+
+    const detail = mapOrderDetail(orderDoc.toObject() as Parameters<typeof mapOrderDetail>[0]);
+
+    return {
+      order: detail,
+      message:
+        "Payment simulated successfully. Paystack integration will replace this step later.",
+    };
+  } catch (err) {
+    if (walletApplied.length > 0) {
+      await rollbackSellerCredits(walletApplied);
+    }
+    if (createdOrderId) {
+      await Order.deleteOne({ _id: createdOrderId });
+      await Receipt.deleteOne({ orderId: createdOrderId });
+    }
+    if (err instanceof CartHttpError) {
+      throw new OrdersHttpError(err.statusCode, err.message);
+    }
+    if (err instanceof OrdersHttpError) {
+      throw err;
+    }
+    throw err;
+  }
+}
+
 export type ReceiptSummaryDto = {
   id: string;
   orderId: string;
@@ -556,7 +817,7 @@ export type ReceiptSummaryDto = {
 export type ReceiptLineDto = {
   serviceId: string;
   sellerUserId?: string;
-  lineKind?: "sale" | "hire";
+  lineKind?: "sale" | "hire" | "book";
   title: string;
   unitPriceNgn: number;
   quantity: number;
@@ -565,8 +826,13 @@ export type ReceiptLineDto = {
   departmentName: string;
   hireStart?: string;
   hireEnd?: string;
+  bookStart?: string;
+  bookEnd?: string;
   pricingPeriod?: PricingPeriod;
   hireBillableUnits?: number;
+  bookBillableUnits?: number;
+  /** First listing photo URL when the service still exists in the catalog. */
+  primaryPhotoUrl?: string;
 };
 
 export type ReceiptDetailDto = {
@@ -616,7 +882,55 @@ export async function getMyReceiptByOrderId(
     throw new OrdersHttpError(404, "Receipt not found");
   }
 
-  const lines = Array.isArray(doc.lines) ? doc.lines : [];
+  type ReceiptLineLean = {
+    serviceId: mongoose.Types.ObjectId;
+    sellerUserId?: mongoose.Types.ObjectId;
+    lineKind?: string;
+    title: string;
+    unitPriceNgn: number;
+    quantity: number;
+    lineTotalNgn: number;
+    categoryName: string;
+    departmentName: string;
+    hireStart?: Date;
+    hireEnd?: Date;
+    bookStart?: Date;
+    bookEnd?: Date;
+    pricingPeriod?: string;
+    hireBillableUnits?: number;
+    bookBillableUnits?: number;
+  };
+
+  const lines: ReceiptLineLean[] = Array.isArray(doc.lines)
+    ? (doc.lines as ReceiptLineLean[])
+    : [];
+
+  const serviceIdObjs = [
+    ...new Set(
+      lines
+        .map((l) => l.serviceId as mongoose.Types.ObjectId | undefined)
+        .filter(
+          (id): id is mongoose.Types.ObjectId =>
+            id != null && mongoose.Types.ObjectId.isValid(id),
+        )
+        .map((id) => id.toString()),
+    ),
+  ].map((s) => new mongoose.Types.ObjectId(s));
+
+  const photoByServiceId = new Map<string, string>();
+  if (serviceIdObjs.length > 0) {
+    const svcRows = await Service.find({ _id: { $in: serviceIdObjs } })
+      .select({ photoUrls: 1 })
+      .lean();
+    for (const s of svcRows) {
+      const urls = s.photoUrls as string[] | undefined;
+      const first =
+        Array.isArray(urls) ? urls.find((u) => typeof u === "string" && u.trim()) : undefined;
+      if (first) {
+        photoByServiceId.set((s._id as mongoose.Types.ObjectId).toString(), first.trim());
+      }
+    }
+  }
 
   return {
     id: (doc._id as mongoose.Types.ObjectId).toString(),
@@ -629,10 +943,15 @@ export async function getMyReceiptByOrderId(
       const sellerUid = l.sellerUserId as mongoose.Types.ObjectId | undefined;
       const hireStart = l.hireStart as Date | undefined;
       const hireEnd = l.hireEnd as Date | undefined;
+      const bookStart = l.bookStart as Date | undefined;
+      const bookEnd = l.bookEnd as Date | undefined;
       const rawKind = l.lineKind as string | undefined;
       const lineKind =
-        rawKind === "hire" || rawKind === "sale" ? rawKind : undefined;
+        rawKind === "hire" || rawKind === "sale" || rawKind === "book"
+          ? rawKind
+          : undefined;
       const rawPeriod = l.pricingPeriod as string | undefined;
+      const primaryPhotoUrl = photoByServiceId.get(sid.toString());
       return {
         serviceId: sid.toString(),
         ...(sellerUid ? { sellerUserId: sellerUid.toString() } : {}),
@@ -645,6 +964,8 @@ export async function getMyReceiptByOrderId(
         departmentName: l.departmentName,
         ...(hireStart ? { hireStart: hireStart.toISOString() } : {}),
         ...(hireEnd ? { hireEnd: hireEnd.toISOString() } : {}),
+        ...(bookStart ? { bookStart: bookStart.toISOString() } : {}),
+        ...(bookEnd ? { bookEnd: bookEnd.toISOString() } : {}),
         ...(rawPeriod === "hourly" ||
         rawPeriod === "daily" ||
         rawPeriod === "weekly" ||
@@ -655,6 +976,10 @@ export async function getMyReceiptByOrderId(
         ...(typeof l.hireBillableUnits === "number"
           ? { hireBillableUnits: l.hireBillableUnits }
           : {}),
+        ...(typeof l.bookBillableUnits === "number"
+          ? { bookBillableUnits: l.bookBillableUnits }
+          : {}),
+        ...(primaryPhotoUrl ? { primaryPhotoUrl } : {}),
       };
     }),
     paymentProvider: doc.paymentProvider,
@@ -974,6 +1299,163 @@ export async function listProviderHireBookings(
   });
 
   rows.sort((a, b) => new Date(b.hireEnd).getTime() - new Date(a.hireEnd).getTime());
+
+  return rows;
+}
+
+export type ProviderPersonnelBookingRowDto = {
+  orderId: string;
+  receiptNumber: string;
+  paidAt: string;
+  serviceId: string;
+  listingTitle: string;
+  bookStart: string;
+  bookEnd: string;
+  pricingPeriod: PricingPeriod;
+  bookBillableUnits: number;
+  quantity: number;
+  lineTotalNgn: number;
+  customer: ProviderHireBookingCustomerDto;
+};
+
+export async function listProviderPersonnelBookings(
+  providerUserId: string,
+): Promise<ProviderPersonnelBookingRowDto[]> {
+  const trimmed = providerUserId?.trim() ?? "";
+  if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new OrdersHttpError(400, "Invalid user id");
+  }
+
+  const providerOid = new mongoose.Types.ObjectId(trimmed);
+  const serviceDocs = await Service.find({ userId: providerOid }).select("_id").lean();
+  const serviceIds = serviceDocs.map((d) => d._id as mongoose.Types.ObjectId);
+  const listingIdSet = new Set(serviceIds.map((id) => id.toString()));
+
+  const elemMatch: Record<string, unknown> = {
+    lineKind: "book",
+    $or: [{ sellerUserId: providerOid }],
+  };
+  if (serviceIds.length > 0) {
+    (elemMatch.$or as object[]).push({ serviceId: { $in: serviceIds } });
+  }
+
+  const orders = await Order.find({
+    lines: { $elemMatch: elemMatch },
+  })
+    .sort({ paidAt: -1 })
+    .limit(500)
+    .lean();
+
+  type OrderLineLean = {
+    lineKind?: string;
+    sellerUserId?: mongoose.Types.ObjectId;
+    serviceId: mongoose.Types.ObjectId;
+    title: string;
+    bookStart?: Date;
+    bookEnd?: Date;
+    pricingPeriod?: string;
+    bookBillableUnits?: number;
+    quantity: number;
+    lineTotalNgn: number;
+  };
+
+  const buyerIds = new Set<string>();
+  const candidateRows: {
+    orderId: mongoose.Types.ObjectId;
+    receiptNumber: string;
+    paidAt: Date;
+    buyerId: mongoose.Types.ObjectId;
+    line: OrderLineLean;
+  }[] = [];
+
+  for (const doc of orders) {
+    const lines = Array.isArray(doc.lines) ? (doc.lines as OrderLineLean[]) : [];
+    const buyerId = doc.userId as mongoose.Types.ObjectId;
+    for (const line of lines) {
+      if (line.lineKind !== "book") {
+        continue;
+      }
+      if (!hireLineBelongsToProvider(line, providerOid, listingIdSet)) {
+        continue;
+      }
+      const bookEnd = line.bookEnd;
+      const bookStart = line.bookStart;
+      if (!bookEnd || !bookStart) {
+        continue;
+      }
+      buyerIds.add(buyerId.toString());
+      candidateRows.push({
+        orderId: doc._id as mongoose.Types.ObjectId,
+        receiptNumber: doc.receiptNumber as string,
+        paidAt: doc.paidAt as Date,
+        buyerId,
+        line,
+      });
+    }
+  }
+
+  const buyers = await User.find({
+    _id: { $in: [...buyerIds].map((id) => new mongoose.Types.ObjectId(id)) },
+  })
+    .select("firstName lastName email phone")
+    .lean();
+
+  const buyerById = new Map<string, ProviderHireBookingCustomerDto>();
+  for (const u of buyers) {
+    const id = (u._id as mongoose.Types.ObjectId).toString();
+    buyerById.set(id, {
+      id,
+      firstName: typeof u.firstName === "string" ? u.firstName : "",
+      lastName: typeof u.lastName === "string" ? u.lastName : "",
+      email: typeof u.email === "string" ? u.email : "",
+      phone: typeof u.phone === "string" ? u.phone : "",
+    });
+  }
+
+  const defaultCustomer = (id: string): ProviderHireBookingCustomerDto => ({
+    id,
+    firstName: "Unknown",
+    lastName: "",
+    email: "",
+    phone: "",
+  });
+
+  const periodOrDaily = (raw: string | undefined): PricingPeriod => {
+    if (
+      raw === "hourly" ||
+      raw === "daily" ||
+      raw === "weekly" ||
+      raw === "monthly" ||
+      raw === "yearly"
+    ) {
+      return raw;
+    }
+    return "daily";
+  };
+
+  const rows: ProviderPersonnelBookingRowDto[] = candidateRows.map((r) => {
+    const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
+    const bu =
+      typeof r.line.bookBillableUnits === "number" && r.line.bookBillableUnits >= 1
+        ? r.line.bookBillableUnits
+        : 1;
+    return {
+      orderId: r.orderId.toString(),
+      receiptNumber: r.receiptNumber,
+      paidAt: r.paidAt.toISOString(),
+      serviceId: r.line.serviceId.toString(),
+      listingTitle: r.line.title,
+      bookStart: r.line.bookStart!.toISOString(),
+      bookEnd: r.line.bookEnd!.toISOString(),
+      pricingPeriod: periodOrDaily(r.line.pricingPeriod),
+      bookBillableUnits: bu,
+      quantity: r.line.quantity,
+      lineTotalNgn: r.line.lineTotalNgn,
+      customer,
+    };
+  });
+
+  rows.sort((a, b) => new Date(b.bookEnd).getTime() - new Date(a.bookEnd).getTime());
 
   return rows;
 }

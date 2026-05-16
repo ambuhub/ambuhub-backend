@@ -164,4 +164,103 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
+ *   patch:
+ *     tags: [Auth]
+ *     summary: Update profile
+ *     description: |
+ *       Updates the authenticated user's profile. Email and role cannot be changed.
+ *       - **client**: send `UpdateClientProfileRequest` (includes dateOfBirth).
+ *       - **service_provider**: send `UpdateProviderProfileRequest` (business fields).
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - $ref: '#/components/schemas/UpdateClientProfileRequest'
+ *               - $ref: '#/components/schemas/UpdateProviderProfileRequest'
+ *     responses:
+ *       200:
+ *         description: Updated user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthUserResponse'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Wrong account type for this profile update
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       404:
+ *         description: User or provider profile not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/auth/change-password:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Change password (authenticated)
+ *     description: Verifies the current password, then sets a new password. Session cookie remains valid.
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ChangePasswordRequest'
+ *     responses:
+ *       200:
+ *         description: Password updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OkMessageResponse'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       401:
+ *         description: Not authenticated or current password incorrect
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
  */

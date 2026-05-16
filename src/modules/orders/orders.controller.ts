@@ -8,7 +8,9 @@ import {
   listMyOrders,
   listMyReceipts,
   listProviderHireBookings,
+  listProviderPersonnelBookings,
   OrdersHttpError,
+  simulateBookPaystackCheckout,
   simulateHirePaystackCheckout,
   simulatePaystackCheckout,
 } from "./orders.service";
@@ -61,6 +63,30 @@ export async function postHireSimulateCheckoutHandler(
   }
 }
 
+export async function postBookSimulateCheckoutHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const result = await simulateBookPaystackCheckout(req.auth.userId, req.body ?? {});
+    res.status(201).json(result);
+  } catch (err: unknown) {
+    if (err instanceof OrdersHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    if (err instanceof CartHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
 export async function getProviderHireBookingsHandler(
   req: Request,
   res: Response,
@@ -71,6 +97,26 @@ export async function getProviderHireBookingsHandler(
       return;
     }
     const bookings = await listProviderHireBookings(req.auth.userId);
+    res.status(200).json({ bookings });
+  } catch (err: unknown) {
+    if (err instanceof OrdersHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getProviderPersonnelBookingsHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const bookings = await listProviderPersonnelBookings(req.auth.userId);
     res.status(200).json({ bookings });
   } catch (err: unknown) {
     if (err instanceof OrdersHttpError) {

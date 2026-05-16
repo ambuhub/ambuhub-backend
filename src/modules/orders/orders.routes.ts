@@ -4,9 +4,11 @@ import {
   getMyOrderHandler,
   getMyReceiptByOrderHandler,
   getProviderHireBookingsHandler,
+  getProviderPersonnelBookingsHandler,
   getProviderSalesByMonthHandler,
   listMyOrdersHandler,
   listMyReceiptsHandler,
+  postBookSimulateCheckoutHandler,
   postHireSimulateCheckoutHandler,
   postSimulateCheckoutHandler,
 } from "./orders.controller";
@@ -19,6 +21,11 @@ router.post(
   authenticate,
   postHireSimulateCheckoutHandler,
 );
+router.post(
+  "/book-checkout/simulate-paystack",
+  authenticate,
+  postBookSimulateCheckoutHandler,
+);
 router.get(
   "/provider/sales-by-month",
   authenticate,
@@ -30,6 +37,12 @@ router.get(
   authenticate,
   requireServiceProvider,
   getProviderHireBookingsHandler,
+);
+router.get(
+  "/provider/bookings",
+  authenticate,
+  requireServiceProvider,
+  getProviderPersonnelBookingsHandler,
 );
 router.get("/me", authenticate, listMyOrdersHandler);
 router.get("/me/:orderId", authenticate, getMyOrderHandler);

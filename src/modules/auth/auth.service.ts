@@ -427,3 +427,193 @@ export async function resetPasswordWithoutVerification(
     modifiedCount: result.modifiedCount,
   });
 }
+
+export interface UpdateClientProfileInput {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  countryCode: string;
+  dateOfBirth: string;
+}
+
+export async function updateClientProfile(
+  userId: string,
+  input: UpdateClientProfileInput,
+): Promise<PublicAuthUser> {
+  const trimmedId = userId?.trim() ?? "";
+  if (!trimmedId || !mongoose.Types.ObjectId.isValid(trimmedId)) {
+    throw new AuthHttpError(400, "Invalid user id");
+  }
+
+  const user = await User.findById(trimmedId);
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+  if (user.role !== "client") {
+    throw new AuthHttpError(
+      403,
+      "Only client accounts can update profile here",
+    );
+  }
+
+  const { firstName, lastName, phone, countryCode, dateOfBirth } = input;
+  if (
+    !firstName?.trim() ||
+    !lastName?.trim() ||
+    !phone?.trim() ||
+    !countryCode?.trim()
+  ) {
+    throw new AuthHttpError(400, "All fields are required");
+  }
+
+  const normalizedCountryCode = normalizeCountryCode(countryCode);
+  if (!normalizedCountryCode) {
+    throw new AuthHttpError(
+      400,
+      "Country must be a valid ISO 3166-1 alpha-2 code",
+    );
+  }
+
+  const parsedDateOfBirth = parseClientDateOfBirth(dateOfBirth);
+
+  user.firstName = firstName.trim();
+  user.lastName = lastName.trim();
+  user.phone = phone.trim();
+  user.countryCode = normalizedCountryCode;
+  user.dateOfBirth = parsedDateOfBirth;
+  await user.save();
+
+  const updated = await getSessionUser(userId);
+  if (!updated) {
+    throw new AuthHttpError(500, "Could not load updated profile");
+  }
+  return updated;
+}
+
+export interface UpdateProviderProfileInput {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  countryCode: string;
+  businessName: string;
+  physicalAddress: string;
+  website?: string;
+}
+
+export async function updateProviderProfile(
+  userId: string,
+  input: UpdateProviderProfileInput,
+): Promise<PublicAuthUser> {
+  const trimmedId = userId?.trim() ?? "";
+  if (!trimmedId || !mongoose.Types.ObjectId.isValid(trimmedId)) {
+    throw new AuthHttpError(400, "Invalid user id");
+  }
+
+  const user = await User.findById(trimmedId);
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+  if (user.role !== "service_provider") {
+    throw new AuthHttpError(
+      403,
+      "Only service provider accounts can update profile here",
+    );
+  }
+
+  const provider = await ServiceProvider.findOne({ userId: user._id });
+  if (!provider) {
+    throw new AuthHttpError(404, "Service provider profile not found");
+  }
+
+  const {
+    firstName,
+    lastName,
+    phone,
+    countryCode,
+    businessName,
+    physicalAddress,
+    website,
+  } = input;
+
+  if (
+    !firstName?.trim() ||
+    !lastName?.trim() ||
+    !phone?.trim() ||
+    !countryCode?.trim() ||
+    !businessName?.trim() ||
+    !physicalAddress?.trim()
+  ) {
+    throw new AuthHttpError(400, "All required fields must be provided");
+  }
+
+  const normalizedCountryCode = normalizeCountryCode(countryCode);
+  if (!normalizedCountryCode) {
+    throw new AuthHttpError(
+      400,
+      "Country must be a valid ISO 3166-1 alpha-2 code",
+    );
+  }
+
+  const websiteTrimmed = website?.trim() ?? "";
+
+  user.firstName = firstName.trim();
+  user.lastName = lastName.trim();
+  user.phone = phone.trim();
+  user.countryCode = normalizedCountryCode;
+  await user.save();
+
+  provider.businessName = businessName.trim();
+  provider.physicalAddress = physicalAddress.trim();
+  provider.website = websiteTrimmed || "";
+  await provider.save();
+
+  const updated = await getSessionUser(userId);
+  if (!updated) {
+    throw new AuthHttpError(500, "Could not load updated profile");
+  }
+  return updated;
+}
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export async function changePassword(
+  userId: string,
+  input: ChangePasswordInput,
+): Promise<void> {
+  const trimmedId = userId?.trim() ?? "";
+  if (!trimmedId || !mongoose.Types.ObjectId.isValid(trimmedId)) {
+    throw new AuthHttpError(400, "Invalid user id");
+  }
+
+  const currentPassword = input.currentPassword ?? "";
+  const newPassword = input.newPassword ?? "";
+
+  if (!currentPassword) {
+    throw new AuthHttpError(400, "Current password is required");
+  }
+  if (!newPassword || newPassword.length < 8) {
+    throw new AuthHttpError(400, "Password must be at least 8 characters");
+  }
+  if (currentPassword === newPassword) {
+    throw new AuthHttpError(
+      400,
+      "New password must be different from the current password",
+    );
+  }
+
+  const user = await User.findById(trimmedId).select("+password");
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+
+  const match = await bcrypt.compare(currentPassword, user.password);
+  if (!match) {
+    throw new AuthHttpError(401, "Current password is incorrect");
+  }
+
+  user.password = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await user.save();
+}

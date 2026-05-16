@@ -37,7 +37,11 @@
  *   post:
  *     tags: [Orders]
  *     summary: Simulate hire checkout (Paystack)
- *     description: Creates a hire order for a single service with a date range.
+ *     description: |
+ *       Creates a hire order for a single service with a date range.
+ *       The listing must have a `hireReturnWindow`. `hireEnd` must fall on an allowed return
+ *       weekday and within return hours (Africa/Lagos WAT); daily+ periods use `timeEnd` on
+ *       the selected return date.
  *     security:
  *       - cookieAuth: []
  *     requestBody:
@@ -66,6 +70,48 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *
+ * /api/orders/book-checkout/simulate-paystack:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Simulate personnel booking checkout (Paystack)
+ *     description: |
+ *       Creates a book order for a single personnel or ambulance-servicing listing.
+ *       Requires bookingWindow, price, and pricingPeriod on the listing. Validates
+ *       free range and gap between bookings.
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BookCheckoutRequest'
+ *     responses:
+ *       201:
+ *         description: Book order created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SimulateCheckoutResponse'
+ *       400:
+ *         description: Invalid booking dates or service
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       409:
+ *         description: Time slot conflict
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
  * /api/orders/provider/sales-by-month:
  *   get:
  *     tags: [Orders]
@@ -89,6 +135,38 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ProviderSalesByMonthResponse'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Not a service provider
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/orders/provider/bookings:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Provider personnel bookings
+ *     description: Service provider only. One row per book line on the provider's listings.
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: Personnel bookings list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 bookings:
+ *                   type: array
+ *                   items:
+ *                     type: object
  *       401:
  *         description: Not authenticated
  *         content:

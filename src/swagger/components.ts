@@ -208,6 +208,30 @@
  *       example:
  *         quantity: 2
  *
+ *     HireReturnWindow:
+ *       type: object
+ *       required: [daysOfWeek, timeStart, timeEnd]
+ *       properties:
+ *         daysOfWeek:
+ *           type: array
+ *           description: Weekdays when returns are accepted (0=Sun … 6=Sat), Africa/Lagos
+ *           items:
+ *             type: integer
+ *             minimum: 0
+ *             maximum: 6
+ *         timeStart:
+ *           type: string
+ *           description: Start of daily return window (HH:mm, 24h, WAT)
+ *           example: "09:00"
+ *         timeEnd:
+ *           type: string
+ *           description: End of daily return window (HH:mm, 24h, WAT)
+ *           example: "16:00"
+ *       example:
+ *         daysOfWeek: [1, 2, 3, 4, 5]
+ *         timeStart: "09:00"
+ *         timeEnd: "16:00"
+ *
  *     ServiceUpsert:
  *       type: object
  *       required: [title, description, serviceCategorySlug, departmentSlug]
@@ -237,6 +261,20 @@
  *           items:
  *             type: string
  *             format: uri
+ *         countryCode:
+ *           type: string
+ *           minLength: 2
+ *           maxLength: 2
+ *           description: ISO 3166-1 alpha-2 (required on create; optional on update)
+ *         stateProvince:
+ *           type: string
+ *           description: Subdivision ISO code from country dataset, or manual text when none exist
+ *         officeAddress:
+ *           type: string
+ *           maxLength: 500
+ *         hireReturnWindow:
+ *           $ref: '#/components/schemas/HireReturnWindow'
+ *           description: Required when listingType is hire; hireEnd at checkout must fall within this schedule (WAT)
  *       example:
  *         title: "BLS Ambulance Hire"
  *         description: "Basic life support ambulance available for hire."
@@ -246,6 +284,13 @@
  *         stock: 3
  *         price: 50000
  *         pricingPeriod: "daily"
+ *         countryCode: "NG"
+ *         stateProvince: "LA"
+ *         officeAddress: "12 Admiralty Way, Lekki Phase 1, Lagos"
+ *         hireReturnWindow:
+ *           daysOfWeek: [1, 2, 3, 4, 5]
+ *           timeStart: "09:00"
+ *           timeEnd: "16:00"
  *         photoUrls:
  *           - "https://res.cloudinary.com/example/image/upload/v1/ambulance.jpg"
  *
@@ -257,6 +302,77 @@
  *           type: boolean
  *       example:
  *         isAvailable: false
+ *
+ *     BookingSettingsPatch:
+ *       type: object
+ *       properties:
+ *         bookingWindow:
+ *           $ref: '#/components/schemas/HireReturnWindow'
+ *         bookingGapMinutes:
+ *           type: integer
+ *           minimum: 0
+ *         price:
+ *           type: number
+ *           minimum: 0
+ *           nullable: true
+ *         pricingPeriod:
+ *           type: string
+ *           enum: [hourly, daily, weekly, monthly, yearly]
+ *           nullable: true
+ *         isAvailable:
+ *           type: boolean
+ *
+ *     BookCheckoutRequest:
+ *       type: object
+ *       required: [serviceId, bookStart, bookEnd]
+ *       properties:
+ *         serviceId:
+ *           type: string
+ *         bookStart:
+ *           type: string
+ *           format: date-time
+ *         bookEnd:
+ *           type: string
+ *           format: date-time
+ *
+ *     BookingAvailabilityResponse:
+ *       type: object
+ *       properties:
+ *         bookingWindow:
+ *           allOf:
+ *             - $ref: '#/components/schemas/HireReturnWindow'
+ *           nullable: true
+ *         bookingGapMinutes:
+ *           type: integer
+ *         price:
+ *           type: number
+ *           nullable: true
+ *         pricingPeriod:
+ *           type: string
+ *           enum: [hourly, daily, weekly, monthly, yearly]
+ *           nullable: true
+ *         busyIntervals:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               start:
+ *                 type: string
+ *                 format: date-time
+ *               end:
+ *                 type: string
+ *                 format: date-time
+ *         freeRanges:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               start:
+ *                 type: string
+ *                 format: date-time
+ *               end:
+ *                 type: string
+ *                 format: date-time
  *
  *     HireCheckoutRequest:
  *       type: object

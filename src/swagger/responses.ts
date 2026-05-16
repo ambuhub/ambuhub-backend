@@ -32,6 +32,91 @@
  *         ok: true
  *         message: "If an account exists for that email, the password has been updated. You can sign in with the new password."
  *
+ *     OkMessageResponse:
+ *       type: object
+ *       required: [ok, message]
+ *       properties:
+ *         ok:
+ *           type: boolean
+ *         message:
+ *           type: string
+ *       example:
+ *         ok: true
+ *         message: "Password updated successfully"
+ *
+ *     UpdateClientProfileRequest:
+ *       type: object
+ *       required: [firstName, lastName, phone, countryCode, dateOfBirth]
+ *       properties:
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *           description: ISO 3166-1 alpha-2
+ *         dateOfBirth:
+ *           type: string
+ *           format: date
+ *           example: "1990-01-15"
+ *       example:
+ *         firstName: "Jane"
+ *         lastName: "Doe"
+ *         phone: "+2348000000000"
+ *         countryCode: "NG"
+ *         dateOfBirth: "1990-01-15"
+ *
+ *     UpdateProviderProfileRequest:
+ *       type: object
+ *       required:
+ *         - firstName
+ *         - lastName
+ *         - phone
+ *         - countryCode
+ *         - businessName
+ *         - physicalAddress
+ *       properties:
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *           description: ISO 3166-1 alpha-2
+ *         businessName:
+ *           type: string
+ *         physicalAddress:
+ *           type: string
+ *         website:
+ *           type: string
+ *           nullable: true
+ *           description: Optional business website
+ *       example:
+ *         firstName: "Jane"
+ *         lastName: "Provider"
+ *         phone: "+2348000000000"
+ *         countryCode: "NG"
+ *         businessName: "Acme Ambulance Ltd"
+ *         physicalAddress: "12 Marina Road, Lagos"
+ *         website: "https://example.com"
+ *
+ *     ChangePasswordRequest:
+ *       type: object
+ *       required: [currentPassword, newPassword]
+ *       properties:
+ *         currentPassword:
+ *           type: string
+ *         newPassword:
+ *           type: string
+ *           minLength: 8
+ *       example:
+ *         currentPassword: "OldSecurePass123!"
+ *         newPassword: "NewSecurePass456!"
+ *
  *     CountryCodeInvalid:
  *       type: object
  *       properties:
@@ -42,6 +127,31 @@
  *       example:
  *         valid: false
  *         message: "Invalid ISO 3166-1 alpha-2 country code"
+ *
+ *     CountryStateOption:
+ *       type: object
+ *       required: [code, name]
+ *       properties:
+ *         code:
+ *           type: string
+ *         name:
+ *           type: string
+ *       example:
+ *         code: "LA"
+ *         name: "Lagos"
+ *
+ *     CountryStatesResponse:
+ *       type: object
+ *       required: [states]
+ *       properties:
+ *         states:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/CountryStateOption'
+ *       example:
+ *         states:
+ *           - code: "LA"
+ *             name: "Lagos"
  *
  *     ServiceCategoryDepartment:
  *       type: object
@@ -176,6 +286,33 @@
  *           items:
  *             type: string
  *             format: uri
+ *         countryCode:
+ *           type: string
+ *           nullable: true
+ *         stateProvince:
+ *           type: string
+ *           nullable: true
+ *         stateProvinceName:
+ *           type: string
+ *           nullable: true
+ *           description: Resolved subdivision name when countryCode and stateProvince are set
+ *         officeAddress:
+ *           type: string
+ *           nullable: true
+ *         hireReturnWindow:
+ *           allOf:
+ *             - $ref: '#/components/schemas/HireReturnWindow'
+ *           nullable: true
+ *         bookingWindow:
+ *           allOf:
+ *             - $ref: '#/components/schemas/HireReturnWindow'
+ *           nullable: true
+ *           description: Weekly bookable hours (WAT) for book listings
+ *         bookingGapMinutes:
+ *           type: integer
+ *           minimum: 0
+ *           nullable: true
+ *           description: Minimum minutes between consecutive bookings
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -197,6 +334,14 @@
  *           id: "507f1f77bcf86cd799439050"
  *           slug: "medical-transport"
  *           name: "Medical Transport"
+ *         countryCode: "NG"
+ *         stateProvince: "LA"
+ *         stateProvinceName: "Lagos"
+ *         officeAddress: "12 Admiralty Way, Lekki Phase 1, Lagos"
+ *         hireReturnWindow:
+ *           daysOfWeek: [1, 2, 3, 4, 5]
+ *           timeStart: "09:00"
+ *           timeEnd: "16:00"
  *         photoUrls:
  *           - "https://res.cloudinary.com/example/image/upload/v1/ambulance.jpg"
  *         createdAt: "2026-02-01T12:00:00.000Z"
@@ -610,6 +755,9 @@
  *           $ref: '#/components/schemas/PricingPeriod'
  *         hireBillableUnits:
  *           type: number
+ *         primaryPhotoUrl:
+ *           type: string
+ *           description: First listing photo when the service still exists
  *       example:
  *         serviceId: "507f1f77bcf86cd799439012"
  *         lineKind: "hire"
@@ -896,4 +1044,197 @@
  *         wallet:
  *           balanceNgn: 125000
  *           currency: "NGN"
+ *
+ *     Review:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         serviceId:
+ *           type: string
+ *         orderId:
+ *           type: string
+ *         rating:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 5
+ *         body:
+ *           type: string
+ *         serviceTitle:
+ *           type: string
+ *         categorySlug:
+ *           type: string
+ *         lineKind:
+ *           type: string
+ *           nullable: true
+ *           enum: [sale, hire]
+ *         reviewerDisplayName:
+ *           type: string
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     ReviewResponse:
+ *       type: object
+ *       required: [review]
+ *       properties:
+ *         review:
+ *           $ref: '#/components/schemas/Review'
+ *
+ *     ReviewListResponse:
+ *       type: object
+ *       required: [reviews]
+ *       properties:
+ *         reviews:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/Review'
+ *
+ *     EligibleReview:
+ *       type: object
+ *       properties:
+ *         orderId:
+ *           type: string
+ *         serviceId:
+ *           type: string
+ *         receiptNumber:
+ *           type: string
+ *         serviceTitle:
+ *           type: string
+ *         categorySlug:
+ *           type: string
+ *         lineKind:
+ *           type: string
+ *           nullable: true
+ *         paidAt:
+ *           type: string
+ *           format: date-time
+ *         hireEnd:
+ *           type: string
+ *           nullable: true
+ *           format: date-time
+ *
+ *     EligibleReviewListResponse:
+ *       type: object
+ *       required: [eligible]
+ *       properties:
+ *         eligible:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/EligibleReview'
+ *
+ *     ServiceReviewSummary:
+ *       type: object
+ *       properties:
+ *         averageRating:
+ *           type: number
+ *           nullable: true
+ *         reviewCount:
+ *           type: integer
+ *
+ *     ServiceReviewsResponse:
+ *       type: object
+ *       required: [summary, reviews]
+ *       properties:
+ *         summary:
+ *           $ref: '#/components/schemas/ServiceReviewSummary'
+ *         reviews:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/Review'
+ *
+ *     ReviewCreateInput:
+ *       type: object
+ *       required: [orderId, serviceId, rating, body]
+ *       properties:
+ *         orderId:
+ *           type: string
+ *         serviceId:
+ *           type: string
+ *         rating:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 5
+ *         body:
+ *           type: string
+ *           minLength: 10
+ *           maxLength: 2000
+ *
+ *     Notification:
+ *       type: object
+ *       required:
+ *         - id
+ *         - type
+ *         - title
+ *         - body
+ *         - orderId
+ *         - serviceId
+ *         - readAt
+ *         - createdAt
+ *       properties:
+ *         id:
+ *           type: string
+ *         type:
+ *           type: string
+ *           enum:
+ *             - hire_return_reminder
+ *             - provider_sale_purchased
+ *             - provider_hire_booked
+ *             - provider_hire_return_reminder
+ *         reminderKind:
+ *           type: string
+ *           enum: [1d, 1h]
+ *           nullable: true
+ *         title:
+ *           type: string
+ *         body:
+ *           type: string
+ *         orderId:
+ *           type: string
+ *         serviceId:
+ *           type: string
+ *         receiptNumber:
+ *           type: string
+ *           nullable: true
+ *         deadlineAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         readAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     NotificationListResponse:
+ *       type: object
+ *       required: [notifications]
+ *       properties:
+ *         notifications:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/Notification'
+ *
+ *     NotificationUnreadCountResponse:
+ *       type: object
+ *       required: [count]
+ *       properties:
+ *         count:
+ *           type: integer
+ *
+ *     NotificationReadResponse:
+ *       type: object
+ *       required: [notification]
+ *       properties:
+ *         notification:
+ *           $ref: '#/components/schemas/Notification'
+ *
+ *     NotificationMarkAllReadResponse:
+ *       type: object
+ *       required: [modifiedCount]
+ *       properties:
+ *         modifiedCount:
+ *           type: integer
  */

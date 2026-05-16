@@ -26,6 +26,11 @@ const userSchema = new mongoose.Schema(
     emailVerified: { type: Boolean, default: false },
     /** Set for clients; null for service providers and legacy users */
     dateOfBirth: { type: Date, default: null },
+    /** Marketplace listing IDs the user saved (most recently added first). */
+    favoriteServiceIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
+      default: [],
+    },
   },
   { timestamps: true }
 );

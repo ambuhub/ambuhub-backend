@@ -8,6 +8,7 @@ import { ensureServiceCategoryCatalogSeeded } from "./modules/serviceCategories/
 import { setupRoutes } from "./routes/api";
 import { setupMiddleware } from "./shared/middlewares/middleware";
 import { logger } from "./shared/lib/logger";
+import { processDueNotificationSchedules } from "./modules/notifications/notifications.service";
 
 dotenv.config();
 
@@ -37,6 +38,16 @@ const startServer = async () => {
     initCloudinary();
     await connectDatabase();
     await ensureServiceCategoryCatalogSeeded();
+    const NOTIFICATION_POLL_MS = 60_000;
+    setInterval(() => {
+      void processDueNotificationSchedules().catch((error) => {
+        logger.error("Notification schedule worker failed", { error });
+      });
+    }, NOTIFICATION_POLL_MS);
+    void processDueNotificationSchedules().catch((error) => {
+      logger.error("Initial notification schedule run failed", { error });
+    });
+
     app.listen(PORT, () => {
       logger.info(`Server started on port ${PORT}`);
     });
