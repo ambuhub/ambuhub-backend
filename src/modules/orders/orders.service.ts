@@ -63,7 +63,7 @@ export type OrderLineDto = {
   hireBillableUnits?: number;
   bookBillableUnits?: number;
   /** Live catalog photos when the service still exists; otherwise `[]`. */
-  imageUrls?: string[];
+  photoUrls?: string[];
 };
 
 export type OrderSummaryDto = {
@@ -186,7 +186,7 @@ function normalizePhotoUrls(urls: unknown): string[] {
     .map((u) => u.trim());
 }
 
-async function loadImageUrlsByServiceIds(
+async function loadPhotoUrlsByServiceIds(
   serviceIds: mongoose.Types.ObjectId[],
 ): Promise<Map<string, string[]>> {
   const unique = [
@@ -213,6 +213,23 @@ async function loadImageUrlsByServiceIds(
     );
   }
   return out;
+}
+
+async function enrichOrderDetailWithPhotoUrls(
+  detail: OrderDetailDto,
+): Promise<OrderDetailDto> {
+  const serviceIds = detail.lines.map(
+    (l) => new mongoose.Types.ObjectId(l.serviceId),
+  );
+  const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(serviceIds);
+
+  return {
+    ...detail,
+    lines: detail.lines.map((line) => ({
+      ...line,
+      photoUrls: photoUrlsByServiceId.get(line.serviceId) ?? [],
+    })),
+  };
 }
 
 export async function listMyOrders(userId: string): Promise<OrderSummaryDto[]> {
@@ -255,18 +272,7 @@ export async function getMyOrderById(
   }
 
   const detail = mapOrderDetail(doc as Parameters<typeof mapOrderDetail>[0]);
-  const serviceIds = detail.lines.map(
-    (l) => new mongoose.Types.ObjectId(l.serviceId),
-  );
-  const imageUrlsByServiceId = await loadImageUrlsByServiceIds(serviceIds);
-
-  return {
-    ...detail,
-    lines: detail.lines.map((line) => ({
-      ...line,
-      imageUrls: imageUrlsByServiceId.get(line.serviceId) ?? [],
-    })),
-  };
+  return enrichOrderDetailWithPhotoUrls(detail);
 }
 
 export type SimulateCheckoutResult = {
@@ -405,7 +411,7 @@ export async function simulatePaystackCheckout(
     const detail = mapOrderDetail(orderDoc.toObject() as Parameters<typeof mapOrderDetail>[0]);
 
     return {
-      order: detail,
+      order: await enrichOrderDetailWithPhotoUrls(detail),
       message:
         "Payment simulated successfully. Paystack integration will replace this step later.",
     };
@@ -635,7 +641,7 @@ export async function simulateHirePaystackCheckout(
     const detail = mapOrderDetail(orderDoc.toObject() as Parameters<typeof mapOrderDetail>[0]);
 
     return {
-      order: detail,
+      order: await enrichOrderDetailWithPhotoUrls(detail),
       message:
         "Payment simulated successfully. Paystack integration will replace this step later.",
     };
@@ -835,7 +841,7 @@ export async function simulateBookPaystackCheckout(
     const detail = mapOrderDetail(orderDoc.toObject() as Parameters<typeof mapOrderDetail>[0]);
 
     return {
-      order: detail,
+      order: await enrichOrderDetailWithPhotoUrls(detail),
       message:
         "Payment simulated successfully. Paystack integration will replace this step later.",
     };
@@ -969,7 +975,7 @@ export async function getMyReceiptByOrderId(
     ),
   ].map((s) => new mongoose.Types.ObjectId(s));
 
-  const imageUrlsByServiceId = await loadImageUrlsByServiceIds(serviceIdObjs);
+  const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(serviceIdObjs);
 
   return {
     id: (doc._id as mongoose.Types.ObjectId).toString(),
@@ -990,7 +996,7 @@ export async function getMyReceiptByOrderId(
           ? rawKind
           : undefined;
       const rawPeriod = l.pricingPeriod as string | undefined;
-      const urls = imageUrlsByServiceId.get(sid.toString());
+      const urls = photoUrlsByServiceId.get(sid.toString());
       const primaryPhotoUrl = urls?.[0];
       return {
         serviceId: sid.toString(),

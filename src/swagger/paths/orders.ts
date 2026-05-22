@@ -4,12 +4,14 @@
  *   post:
  *     tags: [Orders]
  *     summary: Simulate sale checkout (Paystack)
- *     description: Checks out the current user's cart as a simulated Paystack payment (sale items).
+ *     description: |
+ *       Checks out the current user's cart as a simulated Paystack payment (sale items).
+ *       Response `order.lines[]` includes `photoUrls` from each listing's live catalog photos.
  *     security:
  *       - cookieAuth: []
  *     responses:
  *       201:
- *         description: Order created
+ *         description: Order created (lines include `photoUrls`)
  *         content:
  *           application/json:
  *             schema:
@@ -41,7 +43,7 @@
  *       Creates a hire order for a single service with a date range.
  *       The listing must have a `hireReturnWindow`. `hireEnd` must fall on an allowed return
  *       weekday and within return hours (Africa/Lagos WAT); daily+ periods use `timeEnd` on
- *       the selected return date.
+ *       the selected return date. Response `order.lines[]` includes `photoUrls`.
  *     security:
  *       - cookieAuth: []
  *     requestBody:
@@ -52,7 +54,7 @@
  *             $ref: '#/components/schemas/HireCheckoutRequest'
  *     responses:
  *       201:
- *         description: Hire order created
+ *         description: Hire order created (lines include `photoUrls`)
  *         content:
  *           application/json:
  *             schema:
@@ -77,7 +79,7 @@
  *     description: |
  *       Creates a book order for a single personnel or ambulance-servicing listing.
  *       Requires bookingWindow, price, and pricingPeriod on the listing. Validates
- *       free range and gap between bookings.
+ *       free range and gap between bookings. Response `order.lines[]` includes `photoUrls`.
  *     security:
  *       - cookieAuth: []
  *     requestBody:
@@ -88,7 +90,7 @@
  *             $ref: '#/components/schemas/BookCheckoutRequest'
  *     responses:
  *       201:
- *         description: Book order created
+ *         description: Book order created (lines include `photoUrls`)
  *         content:
  *           application/json:
  *             schema:
@@ -233,7 +235,7 @@
  *     summary: Get one of my orders
  *     description: |
  *       Returns full order detail for the authenticated client.
- *       Each line item includes `imageUrls`: all photo URLs from the live service listing
+ *       Each line item includes `photoUrls`: all photo URLs from the live service listing
  *       (`Service.photoUrls`). Returns an empty array when the listing no longer exists or has no photos.
  *     security:
  *       - cookieAuth: []
@@ -246,7 +248,7 @@
  *         example: "507f1f77bcf86cd799439030"
  *     responses:
  *       200:
- *         description: Order detail with line items (each line includes `imageUrls`)
+ *         description: Order detail with line items (each line includes `photoUrls`)
  *         content:
  *           application/json:
  *             schema:
