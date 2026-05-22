@@ -62,6 +62,8 @@ export type OrderLineDto = {
   pricingPeriod?: PricingPeriod;
   hireBillableUnits?: number;
   bookBillableUnits?: number;
+  /** Live catalog photos when the service still exists; otherwise `[]`. */
+  imageUrls?: string[];
 };
 
 export type OrderSummaryDto = {
@@ -175,6 +177,44 @@ function mapOrderDetail(doc: {
   };
 }
 
+function normalizePhotoUrls(urls: unknown): string[] {
+  if (!Array.isArray(urls)) {
+    return [];
+  }
+  return urls
+    .filter((u): u is string => typeof u === "string" && u.trim().length > 0)
+    .map((u) => u.trim());
+}
+
+async function loadImageUrlsByServiceIds(
+  serviceIds: mongoose.Types.ObjectId[],
+): Promise<Map<string, string[]>> {
+  const unique = [
+    ...new Set(
+      serviceIds
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        .map((id) => id.toString()),
+    ),
+  ].map((s) => new mongoose.Types.ObjectId(s));
+
+  const out = new Map<string, string[]>();
+  if (unique.length === 0) {
+    return out;
+  }
+
+  const rows = await Service.find({ _id: { $in: unique } })
+    .select({ photoUrls: 1 })
+    .lean();
+
+  for (const s of rows) {
+    out.set(
+      (s._id as mongoose.Types.ObjectId).toString(),
+      normalizePhotoUrls(s.photoUrls),
+    );
+  }
+  return out;
+}
+
 export async function listMyOrders(userId: string): Promise<OrderSummaryDto[]> {
   const rows = await Order.find({ userId: new mongoose.Types.ObjectId(userId) })
     .sort({ createdAt: -1 })
@@ -214,7 +254,19 @@ export async function getMyOrderById(
     throw new OrdersHttpError(404, "Order not found");
   }
 
-  return mapOrderDetail(doc as Parameters<typeof mapOrderDetail>[0]);
+  const detail = mapOrderDetail(doc as Parameters<typeof mapOrderDetail>[0]);
+  const serviceIds = detail.lines.map(
+    (l) => new mongoose.Types.ObjectId(l.serviceId),
+  );
+  const imageUrlsByServiceId = await loadImageUrlsByServiceIds(serviceIds);
+
+  return {
+    ...detail,
+    lines: detail.lines.map((line) => ({
+      ...line,
+      imageUrls: imageUrlsByServiceId.get(line.serviceId) ?? [],
+    })),
+  };
 }
 
 export type SimulateCheckoutResult = {
@@ -917,20 +969,7 @@ export async function getMyReceiptByOrderId(
     ),
   ].map((s) => new mongoose.Types.ObjectId(s));
 
-  const photoByServiceId = new Map<string, string>();
-  if (serviceIdObjs.length > 0) {
-    const svcRows = await Service.find({ _id: { $in: serviceIdObjs } })
-      .select({ photoUrls: 1 })
-      .lean();
-    for (const s of svcRows) {
-      const urls = s.photoUrls as string[] | undefined;
-      const first =
-        Array.isArray(urls) ? urls.find((u) => typeof u === "string" && u.trim()) : undefined;
-      if (first) {
-        photoByServiceId.set((s._id as mongoose.Types.ObjectId).toString(), first.trim());
-      }
-    }
-  }
+  const imageUrlsByServiceId = await loadImageUrlsByServiceIds(serviceIdObjs);
 
   return {
     id: (doc._id as mongoose.Types.ObjectId).toString(),
@@ -951,7 +990,8 @@ export async function getMyReceiptByOrderId(
           ? rawKind
           : undefined;
       const rawPeriod = l.pricingPeriod as string | undefined;
-      const primaryPhotoUrl = photoByServiceId.get(sid.toString());
+      const urls = imageUrlsByServiceId.get(sid.toString());
+      const primaryPhotoUrl = urls?.[0];
       return {
         serviceId: sid.toString(),
         ...(sellerUid ? { sellerUserId: sellerUid.toString() } : {}),

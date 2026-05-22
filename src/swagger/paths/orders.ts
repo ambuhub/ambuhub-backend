@@ -231,6 +231,10 @@
  *   get:
  *     tags: [Orders]
  *     summary: Get one of my orders
+ *     description: |
+ *       Returns full order detail for the authenticated client.
+ *       Each line item includes `imageUrls`: all photo URLs from the live service listing
+ *       (`Service.photoUrls`). Returns an empty array when the listing no longer exists or has no photos.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -242,7 +246,7 @@
  *         example: "507f1f77bcf86cd799439030"
  *     responses:
  *       200:
- *         description: Order detail with line items
+ *         description: Order detail with line items (each line includes `imageUrls`)
  *         content:
  *           application/json:
  *             schema:

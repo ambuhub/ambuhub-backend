@@ -557,6 +557,14 @@
  *           $ref: '#/components/schemas/PricingPeriod'
  *         hireBillableUnits:
  *           type: number
+ *         imageUrls:
+ *           type: array
+ *           items:
+ *             type: string
+ *           description: |
+ *             Listing photo URLs from the live service catalog (`Service.photoUrls`).
+ *             Populated on `GET /api/orders/me/{orderId}` (always present, may be empty).
+ *             Not included on simulate-checkout responses.
  *       example:
  *         serviceId: "507f1f77bcf86cd799439012"
  *         sellerUserId: "507f1f77bcf86cd799439099"
@@ -568,6 +576,8 @@
  *         categoryName: "Medical Transport"
  *         categorySlug: "medical-transport"
  *         departmentName: "Road Transport"
+ *         imageUrls:
+ *           - "https://res.cloudinary.com/example/image/upload/v1/ambulance.jpg"
  *
  *     OrderSummary:
  *       type: object
@@ -640,6 +650,8 @@
  *             categoryName: "Medical Transport"
  *             categorySlug: "medical-transport"
  *             departmentName: "Road Transport"
+ *             imageUrls:
+ *               - "https://res.cloudinary.com/example/image/upload/v1/ambulance.jpg"
  *         paymentProvider: "paystack"
  *         paystackReference: "SIM-abc123"
  *         paystackSimulated: true
@@ -668,6 +680,8 @@
  *               categoryName: "Medical Transport"
  *               categorySlug: "medical-transport"
  *               departmentName: "Road Transport"
+ *               imageUrls:
+ *                 - "https://res.cloudinary.com/example/image/upload/v1/ambulance.jpg"
  *           paymentProvider: "paystack"
  *           paystackReference: "SIM-abc123"
  *           paystackSimulated: true
