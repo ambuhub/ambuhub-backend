@@ -1,6 +1,11 @@
 import type { PricingPeriod } from "../services/services.service";
+import {
+  lagosWallClockToDate,
+  type HireReturnWindow,
+} from "../../shared/lib/hireReturnWindow";
 
 const HOUR_MS = 3600000;
+const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function inclusiveUtcCalendarDays(start: Date, end: Date): number {
   const s = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
@@ -51,6 +56,46 @@ export function parseHireInstantRange(
     start: parseDay(a, "hireStart"),
     end: parseDay(b, "hireEnd"),
   };
+}
+
+/**
+ * Book checkout: map YYYY-MM-DD fields to Lagos wall-clock instants using the provider window.
+ */
+export function parseBookCalendarRange(
+  bookStartRaw: string,
+  bookEndRaw: string,
+  window: HireReturnWindow,
+): { start: Date; end: Date } {
+  const a = (bookStartRaw ?? "").trim();
+  const b = (bookEndRaw ?? "").trim();
+  if (!a || !b) {
+    throw new Error("bookStart and bookEnd are required");
+  }
+
+  const sm = a.match(DATE_ONLY_RE);
+  const em = b.match(DATE_ONLY_RE);
+  if (!sm || !em) {
+    throw new Error("bookStart and bookEnd must be YYYY-MM-DD for calendar-priced bookings");
+  }
+
+  const start = lagosWallClockToDate(
+    parseInt(sm[1], 10),
+    parseInt(sm[2], 10),
+    parseInt(sm[3], 10),
+    window.timeStart,
+  );
+  const end = lagosWallClockToDate(
+    parseInt(em[1], 10),
+    parseInt(em[2], 10),
+    parseInt(em[3], 10),
+    window.timeEnd,
+  );
+
+  if (end.getTime() <= start.getTime()) {
+    throw new Error("bookEnd must be after bookStart");
+  }
+
+  return { start, end };
 }
 
 export function computeHireBillableUnits(

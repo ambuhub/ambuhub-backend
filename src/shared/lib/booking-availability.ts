@@ -5,25 +5,16 @@ import {
   type BookingWindow,
   type HirePricingPeriod,
 } from "./bookingWindow";
+import {
+  assertSameLagosCalendarDay,
+  buildHourlySegments,
+  type HourlyBookingSchedule,
+} from "./hourly-booking-schedule";
 import { getLagosDateParts, lagosWallClockToDate } from "./hireReturnWindow";
 
+export { normalizeBookingGapMinutes } from "./booking-gap";
+
 export type TimeInterval = { start: Date; end: Date };
-
-const MAX_GAP_MINUTES = 24 * 60;
-
-export function normalizeBookingGapMinutes(raw: unknown): number {
-  if (raw === null || raw === undefined) {
-    return 0;
-  }
-  const n = typeof raw === "number" ? raw : typeof raw === "string" ? parseInt(raw, 10) : NaN;
-  if (!Number.isInteger(n) || n < 0) {
-    throw new Error("bookingGapMinutes must be a non-negative integer");
-  }
-  if (n > MAX_GAP_MINUTES) {
-    throw new Error(`bookingGapMinutes must be at most ${MAX_GAP_MINUTES}`);
-  }
-  return n;
-}
 
 function parseHmToMinutes(hm: string): number {
   const [h, m] = hm.split(":").map((x) => parseInt(x, 10));
@@ -237,19 +228,40 @@ export async function assertBookRangeAvailable(
   serviceId: string,
   bookStart: Date,
   bookEnd: Date,
-  window: BookingWindow,
   gapMinutes: number,
   pricingPeriod: HirePricingPeriod,
+  options: {
+    bookingWindow?: BookingWindow | null;
+    hourlySchedule?: HourlyBookingSchedule | null;
+  },
 ): Promise<void> {
-  assertBookRangeInWindow(bookStart, bookEnd, window, pricingPeriod);
-
   const from = new Date(bookStart.getTime() - 86400000);
   const to = new Date(bookEnd.getTime() + 86400000);
   const busy = await loadBusyBookIntervals(serviceId, from, to);
+
   if (rangesConflictWithBusy(bookStart, bookEnd, busy, gapMinutes)) {
     throw new Error("Selected time conflicts with an existing booking");
   }
 
+  if (pricingPeriod === "hourly") {
+    const schedule = options.hourlySchedule;
+    if (!schedule) {
+      throw new Error("This listing has no hourly booking schedule");
+    }
+    assertSameLagosCalendarDay(bookStart, bookEnd);
+    const segments = buildHourlySegments(schedule, from, to);
+    const free = computeFreeRanges(segments, busy, gapMinutes);
+    if (!isRangeWithinFreeRanges(bookStart, bookEnd, free)) {
+      throw new Error("Selected time is outside available booking hours");
+    }
+    return;
+  }
+
+  const window = options.bookingWindow;
+  if (!window) {
+    throw new Error("This listing has no booking schedule");
+  }
+  assertBookRangeInWindow(bookStart, bookEnd, window, pricingPeriod);
   const weekly = buildWeeklySegments(window, from, to);
   const free = computeFreeRanges(weekly, busy, gapMinutes);
   if (!isRangeWithinFreeRanges(bookStart, bookEnd, free)) {

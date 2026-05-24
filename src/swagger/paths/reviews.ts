@@ -55,7 +55,7 @@
  *   get:
  *     tags: [Reviews]
  *     summary: List purchases/hires the user can still review
- *     description: Sale lines are eligible after payment. Hire lines are eligible after hireEnd.
+ *     description: Sale, hire, and book lines are eligible immediately after payment.
  *     security:
  *       - cookieAuth: []
  *     responses:
@@ -104,7 +104,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not eligible to review yet (e.g. hire not ended)
+ *         description: Not eligible to review this line
  *         content:
  *           application/json:
  *             schema:

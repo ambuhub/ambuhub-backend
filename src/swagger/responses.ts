@@ -254,6 +254,36 @@
  *         slug: "medical-transport"
  *         name: "Medical Transport"
  *
+ *     MarketplaceListingProvider:
+ *       type: object
+ *       required: [businessName, physicalAddress]
+ *       properties:
+ *         businessName:
+ *           type: string
+ *         website:
+ *           type: string
+ *           nullable: true
+ *         physicalAddress:
+ *           type: string
+ *         phone:
+ *           type: string
+ *           nullable: true
+ *         countryCode:
+ *           type: string
+ *           nullable: true
+ *           description: ISO 3166-1 alpha-2
+ *         contactName:
+ *           type: string
+ *           nullable: true
+ *           description: Primary contact display name
+ *       example:
+ *         businessName: "Acme Ambulance Services"
+ *         website: "https://acme-ambulance.example"
+ *         physicalAddress: "12 Admiralty Way, Lekki Phase 1, Lagos"
+ *         phone: "+2348000000000"
+ *         countryCode: "ng"
+ *         contactName: "Jane D."
+ *
  *     Service:
  *       type: object
  *       properties:
@@ -312,13 +342,23 @@
  *           type: integer
  *           minimum: 0
  *           nullable: true
- *           description: Minimum minutes between consecutive bookings
+ *           description: Stored gap in minutes (internal)
+ *         bookingGapHours:
+ *           type: number
+ *           minimum: 0
+ *           nullable: true
+ *           description: Gap between bookings in hours
  *         createdAt:
  *           type: string
  *           format: date-time
  *         updatedAt:
  *           type: string
  *           format: date-time
+ *         provider:
+ *           allOf:
+ *             - $ref: '#/components/schemas/MarketplaceListingProvider'
+ *           nullable: true
+ *           description: Present on marketplace detail by ID; company profile of the listing owner
  *       example:
  *         id: "507f1f77bcf86cd799439012"
  *         title: "BLS Ambulance Hire"
@@ -991,6 +1031,9 @@
  *           type: number
  *         customer:
  *           $ref: '#/components/schemas/ProviderHireBookingCustomer'
+ *         primaryPhotoUrl:
+ *           type: string
+ *           description: First listing photo URL when available
  *       example:
  *         orderId: "507f1f77bcf86cd799439030"
  *         receiptNumber: "RCP-2026-00042"
@@ -1125,6 +1168,10 @@
  *           type: string
  *           format: date-time
  *         hireEnd:
+ *           type: string
+ *           nullable: true
+ *           format: date-time
+ *         bookEnd:
  *           type: string
  *           nullable: true
  *           format: date-time

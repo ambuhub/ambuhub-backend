@@ -19,6 +19,31 @@ const hireReturnWindowSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const timeRangeSchema = new mongoose.Schema(
+  {
+    timeStart: { type: String, required: true, trim: true },
+    timeEnd: { type: String, required: true, trim: true },
+  },
+  { _id: false },
+);
+
+const hourlyScheduleOverrideSchema = new mongoose.Schema(
+  {
+    date: { type: String, required: true, trim: true },
+    kind: { type: String, required: true, enum: ["closed", "custom"] },
+    windows: { type: [timeRangeSchema], default: undefined },
+  },
+  { _id: false },
+);
+
+const hourlyBookingScheduleSchema = new mongoose.Schema(
+  {
+    default: { type: hireReturnWindowSchema, required: true },
+    overrides: { type: [hourlyScheduleOverrideSchema], default: [] },
+  },
+  { _id: false },
+);
+
 const serviceSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
@@ -65,6 +90,7 @@ const serviceSchema = new mongoose.Schema(
     officeAddress: { type: String, trim: true, default: null },
     hireReturnWindow: { type: hireReturnWindowSchema, default: null },
     bookingWindow: { type: hireReturnWindowSchema, default: null },
+    hourlyBookingSchedule: { type: hourlyBookingScheduleSchema, default: null },
     bookingGapMinutes: { type: Number, default: null, min: 0 },
   },
   { timestamps: true }

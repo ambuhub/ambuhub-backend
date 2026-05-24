@@ -454,6 +454,8 @@ export async function patchBookingSettingsHandler(
 
     const service = await updateBookingSettings(req.auth.userId, serviceId, {
       bookingWindow: body.bookingWindow,
+      hourlyBookingSchedule: body.hourlyBookingSchedule,
+      bookingGapHours: body.bookingGapHours,
       bookingGapMinutes: body.bookingGapMinutes,
       price,
       pricingPeriod,

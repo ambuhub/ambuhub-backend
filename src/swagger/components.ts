@@ -308,9 +308,16 @@
  *       properties:
  *         bookingWindow:
  *           $ref: '#/components/schemas/HireReturnWindow'
+ *         bookingGapHours:
+ *           type: number
+ *           minimum: 0
+ *           maximum: 24
+ *           description: Gap between bookings in hours (preferred).
  *         bookingGapMinutes:
  *           type: integer
  *           minimum: 0
+ *           deprecated: true
+ *           description: Legacy; use bookingGapHours.
  *         price:
  *           type: number
  *           minimum: 0
@@ -344,6 +351,10 @@
  *           nullable: true
  *         bookingGapMinutes:
  *           type: integer
+ *           description: Stored gap in minutes (internal).
+ *         bookingGapHours:
+ *           type: number
+ *           description: Gap between bookings in hours (for display and input).
  *         price:
  *           type: number
  *           nullable: true

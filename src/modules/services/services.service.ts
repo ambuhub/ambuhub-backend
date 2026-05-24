@@ -1,14 +1,32 @@
 import mongoose from "mongoose";
 import { Service } from "../../models/service.model";
+import { ServiceProvider } from "../../models/serviceProvider.model";
 import { User } from "../../models/user.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
 import {
   buildWeeklySegments,
   computeFreeRanges,
   loadBusyBookIntervals,
-  normalizeBookingGapMinutes,
   type TimeInterval,
 } from "../../shared/lib/booking-availability";
+import {
+  gapMinutesToHours,
+  resolveBookingGapMinutesFromInput,
+} from "../../shared/lib/booking-gap";
+import {
+  buildHourlySegments,
+  enumerateLagosDates,
+  getScheduledWindowsForDate,
+  lagosDateString,
+  hasHourlyBookingScheduleInput,
+  hasValidHourlySchedule,
+  normalizeHourlyBookingSchedule,
+  parseHourlyBookingScheduleFromDoc,
+  resolveHourlyBookingSchedule,
+  type HourlyBookingSchedule,
+  type HourlyDayKind,
+  type TimeRange,
+} from "../../shared/lib/hourly-booking-schedule";
 import {
   hasBookingWindowInput,
   normalizeBookingWindow,
@@ -85,13 +103,30 @@ export interface MyServiceDto {
   officeAddress: string | null;
   hireReturnWindow: HireReturnWindow | null;
   bookingWindow: BookingWindow | null;
+  hourlyBookingSchedule: HourlyBookingSchedule | null;
   bookingGapMinutes: number | null;
+  /** Gap between bookings in hours (derived from stored minutes). */
+  bookingGapHours: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 /** Public listing card shape (same fields as MyServiceDto; no owner data). */
 export type MarketplaceServiceDto = MyServiceDto;
+
+/** Public company profile shown on marketplace listing detail pages. */
+export type MarketplaceListingProviderDto = {
+  businessName: string;
+  website: string | null;
+  physicalAddress: string;
+  phone: string | null;
+  countryCode: string | null;
+  contactName: string | null;
+};
+
+export type MarketplaceServiceDetailDto = MyServiceDto & {
+  provider: MarketplaceListingProviderDto | null;
+};
 
 type PopulatedCategory = {
   _id: mongoose.Types.ObjectId;
@@ -116,6 +151,7 @@ type LeanPopulatedService = {
   officeAddress?: string | null;
   hireReturnWindow?: unknown;
   bookingWindow?: unknown;
+  hourlyBookingSchedule?: unknown;
   bookingGapMinutes?: number | null;
   createdAt: Date;
   updatedAt: Date;
@@ -181,9 +217,17 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
         : null,
     hireReturnWindow: parseHireReturnWindowFromDoc(doc.hireReturnWindow),
     bookingWindow: parseBookingWindowFromDoc(doc.bookingWindow),
+    hourlyBookingSchedule: resolveHourlyBookingSchedule(
+      doc.hourlyBookingSchedule,
+      doc.bookingWindow,
+    ),
     bookingGapMinutes:
       typeof doc.bookingGapMinutes === "number" && Number.isInteger(doc.bookingGapMinutes)
         ? doc.bookingGapMinutes
+        : null,
+    bookingGapHours:
+      typeof doc.bookingGapMinutes === "number" && doc.bookingGapMinutes >= 0
+        ? gapMinutesToHours(doc.bookingGapMinutes)
         : null,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -263,9 +307,69 @@ export async function listMarketplaceServices(
   };
 }
 
+function formatProviderContactName(firstName: string, lastName: string): string | null {
+  const f = firstName.trim();
+  const l = lastName.trim();
+  if (!f && !l) {
+    return null;
+  }
+  if (!l) {
+    return f;
+  }
+  return `${f} ${l.charAt(0).toUpperCase()}.`;
+}
+
+async function loadMarketplaceListingProvider(
+  userId: mongoose.Types.ObjectId,
+): Promise<MarketplaceListingProviderDto | null> {
+  const [providerRow, userRow] = await Promise.all([
+    ServiceProvider.findOne({ userId }).lean(),
+    User.findById(userId).select("firstName lastName phone countryCode").lean(),
+  ]);
+
+  if (!providerRow) {
+    return null;
+  }
+
+  const businessName =
+    typeof providerRow.businessName === "string"
+      ? providerRow.businessName.trim()
+      : "";
+  if (!businessName) {
+    return null;
+  }
+
+  const websiteRaw =
+    typeof providerRow.website === "string" ? providerRow.website.trim() : "";
+  const physicalAddress =
+    typeof providerRow.physicalAddress === "string"
+      ? providerRow.physicalAddress.trim()
+      : "";
+
+  return {
+    businessName,
+    website: websiteRaw || null,
+    physicalAddress,
+    phone:
+      userRow && typeof userRow.phone === "string" && userRow.phone.trim()
+        ? userRow.phone.trim()
+        : null,
+    countryCode:
+      userRow && typeof userRow.countryCode === "string" && userRow.countryCode.trim()
+        ? userRow.countryCode.trim().toLowerCase()
+        : null,
+    contactName: userRow
+      ? formatProviderContactName(
+          typeof userRow.firstName === "string" ? userRow.firstName : "",
+          typeof userRow.lastName === "string" ? userRow.lastName : "",
+        )
+      : null,
+  };
+}
+
 export async function getMarketplaceServiceById(
   serviceId: string,
-): Promise<MarketplaceServiceDto> {
+): Promise<MarketplaceServiceDetailDto> {
   const trimmed = serviceId?.trim() ?? "";
   if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
     throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
@@ -288,7 +392,16 @@ export async function getMarketplaceServiceById(
     throw new ServicesHttpError(404, "Service not found");
   }
 
-  return mapLeanServiceToDto(doc as LeanPopulatedService);
+  const base = mapLeanServiceToDto(doc as LeanPopulatedService);
+  const ownerId = doc.userId as mongoose.Types.ObjectId | undefined;
+  const provider = ownerId
+    ? await loadMarketplaceListingProvider(ownerId)
+    : null;
+
+  return {
+    ...base,
+    provider,
+  };
 }
 
 export async function listFavoriteServicesForUser(
@@ -917,6 +1030,10 @@ export async function setServiceAvailability(
 }
 
 export interface UpdateBookingSettingsInput extends BookingWindowInput {
+  hourlyBookingSchedule?: unknown;
+  /** Preferred: gap between bookings in hours. */
+  bookingGapHours?: unknown;
+  /** @deprecated Use bookingGapHours. */
   bookingGapMinutes?: unknown;
   price?: number | null;
   pricingPeriod?: string | null;
@@ -957,7 +1074,31 @@ export async function updateBookingSettings(
 
   const updatePayload: Record<string, unknown> = {};
 
-  if (hasBookingWindowInput(input)) {
+  const effectivePeriod =
+    input.pricingPeriod !== undefined && input.pricingPeriod !== null && input.pricingPeriod !== ""
+      ? typeof input.pricingPeriod === "string"
+        ? input.pricingPeriod.trim()
+        : null
+      : (service.pricingPeriod as string | null | undefined);
+
+  if (hasHourlyBookingScheduleInput(input)) {
+    if (effectivePeriod !== "hourly") {
+      throw new ServicesHttpError(
+        400,
+        "hourlyBookingSchedule applies only when pricing period is hourly",
+      );
+    }
+    try {
+      const schedule = normalizeHourlyBookingSchedule(input.hourlyBookingSchedule, {
+        required: true,
+      });
+      updatePayload.hourlyBookingSchedule = schedule;
+      updatePayload.bookingWindow = schedule?.default ?? null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Invalid hourly booking schedule";
+      throw new ServicesHttpError(400, msg);
+    }
+  } else if (hasBookingWindowInput(input)) {
     let bookingWindow: BookingWindow | null = null;
     try {
       bookingWindow = normalizeBookingWindow(input.bookingWindow, { required: true });
@@ -965,11 +1106,18 @@ export async function updateBookingSettings(
       wrapBookingWindowError(err);
     }
     updatePayload.bookingWindow = bookingWindow;
+    if (effectivePeriod === "hourly" && bookingWindow) {
+      updatePayload.hourlyBookingSchedule = {
+        default: bookingWindow,
+        overrides: [],
+      };
+    }
   }
 
-  if (input.bookingGapMinutes !== undefined) {
+  const gapMinutesResolved = resolveBookingGapMinutesFromInput(input);
+  if (gapMinutesResolved !== undefined) {
     try {
-      updatePayload.bookingGapMinutes = normalizeBookingGapMinutes(input.bookingGapMinutes);
+      updatePayload.bookingGapMinutes = gapMinutesResolved;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Invalid booking gap";
       throw new ServicesHttpError(400, msg);
@@ -1032,13 +1180,24 @@ export async function updateBookingSettings(
   return mapLeanServiceToDto(repopulated as LeanPopulatedService);
 }
 
+export type HourlyBookingDayDto = {
+  date: string;
+  kind: HourlyDayKind;
+  windows: TimeRange[];
+  freeSlots: { start: string; end: string }[];
+};
+
 export type BookingAvailabilityDto = {
   bookingWindow: BookingWindow | null;
+  hourlyBookingSchedule: HourlyBookingSchedule | null;
   bookingGapMinutes: number;
+  bookingGapHours: number;
   price: number | null;
   pricingPeriod: PricingPeriod | null;
   busyIntervals: { start: string; end: string }[];
   freeRanges: { start: string; end: string }[];
+  /** Present when pricingPeriod is hourly */
+  days?: HourlyBookingDayDto[];
 };
 
 function intervalToIso(i: TimeInterval): { start: string; end: string } {
@@ -1079,10 +1238,15 @@ export async function getBookingAvailability(
   }
 
   const bookingWindow = parseBookingWindowFromDoc(doc.bookingWindow);
+  const hourlySchedule = resolveHourlyBookingSchedule(
+    doc.hourlyBookingSchedule,
+    doc.bookingWindow,
+  );
   const gapMinutes =
     typeof doc.bookingGapMinutes === "number" && doc.bookingGapMinutes >= 0
       ? doc.bookingGapMinutes
       : 0;
+  const gapHours = gapMinutesToHours(gapMinutes);
 
   const rawPeriod = doc.pricingPeriod;
   const pricingPeriod: PricingPeriod | null =
@@ -1090,11 +1254,60 @@ export async function getBookingAvailability(
       ? (rawPeriod as PricingPeriod)
       : null;
 
+  const price = typeof doc.price === "number" ? doc.price : null;
+
+  if (pricingPeriod === "hourly") {
+    if (!hasValidHourlySchedule(hourlySchedule)) {
+      return {
+        bookingWindow,
+        hourlyBookingSchedule: hourlySchedule,
+        bookingGapMinutes: gapMinutes,
+        bookingGapHours: gapHours,
+        price,
+        pricingPeriod,
+        busyIntervals: [],
+        freeRanges: [],
+        days: [],
+      };
+    }
+
+    const busy = await loadBusyBookIntervals(trimmed, from, to);
+    const segments = buildHourlySegments(hourlySchedule, from, to);
+    const free = computeFreeRanges(segments, busy, gapMinutes);
+    const freeIso = free.map(intervalToIso);
+
+    const days: HourlyBookingDayDto[] = enumerateLagosDates(from, to).map((date) => {
+      const { kind, windows } = getScheduledWindowsForDate(hourlySchedule, date);
+      const daySegments = segments.filter((s) => lagosDateString(s.start) === date);
+      const dayFree = computeFreeRanges(daySegments, busy, gapMinutes);
+      return {
+        date,
+        kind,
+        windows,
+        freeSlots: dayFree.map(intervalToIso),
+      };
+    });
+
+    return {
+      bookingWindow: hourlySchedule.default,
+      hourlyBookingSchedule: hourlySchedule,
+      bookingGapMinutes: gapMinutes,
+      bookingGapHours: gapHours,
+      price,
+      pricingPeriod,
+      busyIntervals: busy.map(intervalToIso),
+      freeRanges: freeIso,
+      days,
+    };
+  }
+
   if (!bookingWindow) {
     return {
       bookingWindow: null,
+      hourlyBookingSchedule: hourlySchedule,
       bookingGapMinutes: gapMinutes,
-      price: typeof doc.price === "number" ? doc.price : null,
+      bookingGapHours: gapHours,
+      price,
       pricingPeriod,
       busyIntervals: [],
       freeRanges: [],
@@ -1107,8 +1320,10 @@ export async function getBookingAvailability(
 
   return {
     bookingWindow,
+    hourlyBookingSchedule: hourlySchedule,
     bookingGapMinutes: gapMinutes,
-    price: typeof doc.price === "number" ? doc.price : null,
+    bookingGapHours: gapHours,
+    price,
     pricingPeriod,
     busyIntervals: busy.map(intervalToIso),
     freeRanges: free.map(intervalToIso),

@@ -3,6 +3,11 @@ import { Cart } from "../../models/cart.model";
 import { Service } from "../../models/service.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
 import { parseBookingWindowFromDoc } from "../../shared/lib/bookingWindow";
+import {
+  hasValidHourlySchedule,
+  resolveHourlyBookingSchedule,
+  type HourlyBookingSchedule,
+} from "../../shared/lib/hourly-booking-schedule";
 import type { ListingType, PricingPeriod } from "../services/services.service";
 
 const HIRE_PRICING_PERIODS = new Set<PricingPeriod>([
@@ -43,6 +48,7 @@ type LeanServiceForCart = {
   photoUrls: unknown;
   hireReturnWindow?: unknown;
   bookingWindow?: unknown;
+  hourlyBookingSchedule?: unknown;
   bookingGapMinutes?: number | null;
   serviceCategoryId: PopulatedCategory | null;
 };
@@ -213,7 +219,8 @@ export async function loadBookServiceForCheckout(
 ): Promise<
   LeanServiceForCart & {
     pricingPeriod: PricingPeriod;
-    bookingWindow: NonNullable<ReturnType<typeof parseBookingWindowFromDoc>>;
+    bookingWindow: ReturnType<typeof parseBookingWindowFromDoc>;
+    hourlyBookingSchedule: HourlyBookingSchedule | null;
     bookingGapMinutes: number;
   }
 > {
@@ -262,7 +269,19 @@ export async function loadBookServiceForCheckout(
   }
 
   const bookingWindow = parseBookingWindowFromDoc(lean.bookingWindow);
-  if (!bookingWindow) {
+  const hourlyBookingSchedule = resolveHourlyBookingSchedule(
+    lean.hourlyBookingSchedule,
+    lean.bookingWindow,
+  );
+
+  if (pricingPeriod === "hourly") {
+    if (!hasValidHourlySchedule(hourlyBookingSchedule)) {
+      throw new CartHttpError(
+        400,
+        "This listing has no hourly booking schedule. Booking is unavailable until the provider updates it.",
+      );
+    }
+  } else if (!bookingWindow) {
     throw new CartHttpError(
       400,
       "This listing has no booking schedule. Booking is unavailable until the provider updates it.",
@@ -274,7 +293,13 @@ export async function loadBookServiceForCheckout(
       ? lean.bookingGapMinutes
       : 0;
 
-  return { ...lean, pricingPeriod, bookingWindow, bookingGapMinutes };
+  return {
+    ...lean,
+    pricingPeriod,
+    bookingWindow,
+    hourlyBookingSchedule,
+    bookingGapMinutes,
+  };
 }
 
 export async function getCart(userId: string): Promise<CartDto> {

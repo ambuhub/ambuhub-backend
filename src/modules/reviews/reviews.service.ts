@@ -21,7 +21,7 @@ export type ReviewDto = {
   body: string;
   serviceTitle: string;
   categorySlug: string;
-  lineKind: "sale" | "hire" | null;
+  lineKind: "sale" | "hire" | "book" | null;
   reviewerDisplayName: string;
   createdAt: string;
 };
@@ -32,9 +32,10 @@ export type EligibleReviewDto = {
   receiptNumber: string;
   serviceTitle: string;
   categorySlug: string;
-  lineKind: "sale" | "hire" | null;
+  lineKind: "sale" | "hire" | "book" | null;
   paidAt: string;
   hireEnd: string | null;
+  bookEnd: string | null;
 };
 
 export type ServiceReviewSummaryDto = {
@@ -45,11 +46,25 @@ export type ServiceReviewSummaryDto = {
 type OrderLineLean = {
   serviceId: mongoose.Types.ObjectId;
   sellerUserId?: mongoose.Types.ObjectId;
-  lineKind?: "sale" | "hire";
+  lineKind?: "sale" | "hire" | "book";
   title: string;
   categorySlug: string;
   hireEnd?: Date;
+  bookEnd?: Date;
 };
+
+function resolveLineKind(line: OrderLineLean): "sale" | "hire" | "book" {
+  if (line.lineKind === "sale" || line.lineKind === "hire" || line.lineKind === "book") {
+    return line.lineKind;
+  }
+  if (line.hireEnd) {
+    return "hire";
+  }
+  if (line.bookEnd) {
+    return "book";
+  }
+  return "sale";
+}
 
 function formatReviewerDisplayName(firstName: string, lastName: string): string {
   const f = firstName.trim();
@@ -93,17 +108,8 @@ function reviewedKey(orderId: string, serviceId: string): string {
   return `${orderId}:${serviceId}`;
 }
 
-function isLineEligibleForReview(
-  line: OrderLineLean,
-  now: Date,
-): boolean {
-  const kind = line.lineKind ?? (line.hireEnd ? "hire" : "sale");
-  if (kind === "hire") {
-    if (!line.hireEnd) {
-      return false;
-    }
-    return line.hireEnd.getTime() <= now.getTime();
-  }
+/** Paid order lines can be reviewed as soon as checkout completes. */
+function isLineEligibleForReview(_line: OrderLineLean): boolean {
   return true;
 }
 
@@ -150,7 +156,6 @@ export async function listEligibleReviews(
     ),
   );
 
-  const now = new Date();
   const eligible: EligibleReviewDto[] = [];
 
   for (const order of orders) {
@@ -164,7 +169,7 @@ export async function listEligibleReviews(
       if (reviewed.has(reviewedKey(orderId, serviceId))) {
         continue;
       }
-      if (!isLineEligibleForReview(line, now)) {
+      if (!isLineEligibleForReview(line)) {
         continue;
       }
       eligible.push({
@@ -173,9 +178,10 @@ export async function listEligibleReviews(
         receiptNumber,
         serviceTitle: line.title,
         categorySlug: line.categorySlug,
-        lineKind: line.lineKind ?? (line.hireEnd ? "hire" : "sale"),
+        lineKind: resolveLineKind(line),
         paidAt,
         hireEnd: line.hireEnd ? line.hireEnd.toISOString() : null,
+        bookEnd: line.bookEnd ? line.bookEnd.toISOString() : null,
       });
     }
   }
@@ -222,12 +228,8 @@ async function assertUserMayReviewLine(
     );
   }
 
-  const now = new Date();
-  if (!isLineEligibleForReview(line, now)) {
-    throw new ReviewsHttpError(
-      403,
-      "You can review this item after your hire period ends, or once your purchase is complete",
-    );
+  if (!isLineEligibleForReview(line)) {
+    throw new ReviewsHttpError(403, "You cannot review this purchase yet");
   }
 
   const existing = await Review.findOne({
@@ -290,7 +292,7 @@ export async function createReview(
     serviceId: new mongoose.Types.ObjectId(input.serviceId),
     orderId: new mongoose.Types.ObjectId(input.orderId),
     sellerUserId: line.sellerUserId,
-    lineKind: line.lineKind ?? (line.hireEnd ? "hire" : "sale"),
+    lineKind: resolveLineKind(line),
     serviceTitle: line.title,
     categorySlug: line.categorySlug,
     rating,

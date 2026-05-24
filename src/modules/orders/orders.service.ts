@@ -21,7 +21,11 @@ import {
 } from "../../shared/lib/hireReturnWindow";
 import type { PricingPeriod } from "../services/services.service";
 import { assertBookRangeAvailable } from "../../shared/lib/booking-availability";
-import { computeHireBillableUnits, parseHireInstantRange } from "./hire-pricing";
+import {
+  computeHireBillableUnits,
+  parseBookCalendarRange,
+  parseHireInstantRange,
+} from "./hire-pricing";
 import {
   creditSellersForCheckoutLines,
   rollbackSellerCredits,
@@ -698,7 +702,19 @@ export async function simulateBookPaystackCheckout(
 
   let range: { start: Date; end: Date };
   try {
-    range = parseHireInstantRange(pricingPeriod, bookStartRaw, bookEndRaw);
+    if (
+      pricingPeriod !== "hourly" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(bookStartRaw.trim()) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(bookEndRaw.trim())
+    ) {
+      range = parseBookCalendarRange(
+        bookStartRaw,
+        bookEndRaw,
+        svc.bookingWindow,
+      );
+    } else {
+      range = parseHireInstantRange(pricingPeriod, bookStartRaw, bookEndRaw);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Invalid booking dates";
     throw new OrdersHttpError(400, msg);
@@ -709,9 +725,12 @@ export async function simulateBookPaystackCheckout(
       svc._id.toString(),
       range.start,
       range.end,
-      svc.bookingWindow,
       svc.bookingGapMinutes,
       pricingPeriod,
+      {
+        bookingWindow: svc.bookingWindow,
+        hourlySchedule: svc.hourlyBookingSchedule,
+      },
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Booking time is not available";
@@ -794,9 +813,12 @@ export async function simulateBookPaystackCheckout(
       svc._id.toString(),
       range.start,
       range.end,
-      svc.bookingWindow,
       svc.bookingGapMinutes,
       pricingPeriod,
+      {
+        bookingWindow: svc.bookingWindow,
+        hourlySchedule: svc.hourlyBookingSchedule,
+      },
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Booking time is no longer available";
@@ -1183,6 +1205,7 @@ export type ProviderHireBookingRowDto = {
   quantity: number;
   lineTotalNgn: number;
   customer: ProviderHireBookingCustomerDto;
+  primaryPhotoUrl?: string;
 };
 
 function hireLineBelongsToProvider(
@@ -1322,12 +1345,19 @@ export async function listProviderHireBookings(
     return "daily";
   };
 
+  const uniqueServiceIds = [
+    ...new Set(candidateRows.map((r) => r.line.serviceId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+  const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(uniqueServiceIds);
+
   const rows: ProviderHireBookingRowDto[] = candidateRows.map((r) => {
     const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
     const bu =
       typeof r.line.hireBillableUnits === "number" && r.line.hireBillableUnits >= 1
         ? r.line.hireBillableUnits
         : 1;
+    const urls = photoUrlsByServiceId.get(r.line.serviceId.toString());
+    const primaryPhotoUrl = urls?.[0];
     return {
       orderId: r.orderId.toString(),
       receiptNumber: r.receiptNumber,
@@ -1341,6 +1371,7 @@ export async function listProviderHireBookings(
       quantity: r.line.quantity,
       lineTotalNgn: r.line.lineTotalNgn,
       customer,
+      ...(primaryPhotoUrl ? { primaryPhotoUrl } : {}),
     };
   });
 
@@ -1362,6 +1393,7 @@ export type ProviderPersonnelBookingRowDto = {
   quantity: number;
   lineTotalNgn: number;
   customer: ProviderHireBookingCustomerDto;
+  primaryPhotoUrl?: string;
 };
 
 export async function listProviderPersonnelBookings(
@@ -1479,12 +1511,19 @@ export async function listProviderPersonnelBookings(
     return "daily";
   };
 
+  const uniqueServiceIds = [
+    ...new Set(candidateRows.map((r) => r.line.serviceId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+  const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(uniqueServiceIds);
+
   const rows: ProviderPersonnelBookingRowDto[] = candidateRows.map((r) => {
     const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
     const bu =
       typeof r.line.bookBillableUnits === "number" && r.line.bookBillableUnits >= 1
         ? r.line.bookBillableUnits
         : 1;
+    const urls = photoUrlsByServiceId.get(r.line.serviceId.toString());
+    const primaryPhotoUrl = urls?.[0];
     return {
       orderId: r.orderId.toString(),
       receiptNumber: r.receiptNumber,
@@ -1498,6 +1537,7 @@ export async function listProviderPersonnelBookings(
       quantity: r.line.quantity,
       lineTotalNgn: r.line.lineTotalNgn,
       customer,
+      ...(primaryPhotoUrl ? { primaryPhotoUrl } : {}),
     };
   });
 

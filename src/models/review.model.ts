@@ -26,7 +26,7 @@ const reviewSchema = new mongoose.Schema(
     },
     lineKind: {
       type: String,
-      enum: ["sale", "hire"],
+      enum: ["sale", "hire", "book"],
       required: false,
     },
     /** Snapshot for display if listing is renamed or removed from marketplace */
