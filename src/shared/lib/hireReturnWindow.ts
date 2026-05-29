@@ -121,6 +121,18 @@ export function parseHireReturnWindowFromDoc(
 
 export function normalizeHireReturnWindow(
   input: unknown,
+  options: { required: true },
+): HireReturnWindow;
+export function normalizeHireReturnWindow(
+  input: unknown,
+  options: { required: false },
+): HireReturnWindow | null;
+export function normalizeHireReturnWindow(
+  input: unknown,
+  options: { required: boolean },
+): HireReturnWindow | null;
+export function normalizeHireReturnWindow(
+  input: unknown,
   options: { required: boolean },
 ): HireReturnWindow | null {
   if (input === undefined || input === null) {

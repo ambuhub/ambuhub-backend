@@ -52,10 +52,7 @@ async function main(): Promise<void> {
   const userId = user._id as mongoose.Types.ObjectId;
 
   const userPatch: Record<string, string> = { countryCode: normalizedCountry };
-  const legacyName =
-    typeof (user as { name?: string }).name === "string"
-      ? (user as { name: string }).name.trim()
-      : "";
+  const legacyName = String((user as { name?: string }).name ?? "").trim();
   if (!user.firstName?.trim() && legacyName) {
     const parts = legacyName.split(/\s+/);
     userPatch.firstName = parts[0] ?? "Dolphines";

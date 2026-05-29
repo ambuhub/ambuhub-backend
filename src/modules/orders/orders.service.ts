@@ -707,6 +707,9 @@ export async function simulateBookPaystackCheckout(
       /^\d{4}-\d{2}-\d{2}$/.test(bookStartRaw.trim()) &&
       /^\d{4}-\d{2}-\d{2}$/.test(bookEndRaw.trim())
     ) {
+      if (!svc.bookingWindow) {
+        throw new OrdersHttpError(400, "This listing has no booking schedule");
+      }
       range = parseBookCalendarRange(
         bookStartRaw,
         bookEndRaw,

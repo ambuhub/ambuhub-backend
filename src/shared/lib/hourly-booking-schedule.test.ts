@@ -97,7 +97,7 @@ describe("normalizeHourlyBookingSchedule", () => {
           default: baseSchedule.default,
           overrides: [
             {
-              date: lagosDateString(),
+              date: "2026-05-26",
               kind: "custom",
               windows: [
                 { timeStart: "09:00", timeEnd: "12:00" },
