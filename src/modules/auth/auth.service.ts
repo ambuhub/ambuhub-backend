@@ -207,6 +207,9 @@ export async function register(
   if (!password || password.length < 8) {
     throw new AuthHttpError(400, "Password must be at least 8 characters");
   }
+  if (role === "admin") {
+    throw new AuthHttpError(400, "Admin accounts cannot be created via registration");
+  }
   if (role !== "client" && role !== "service_provider") {
     throw new AuthHttpError(400, "Invalid role");
   }
@@ -321,6 +324,10 @@ export async function getSessionUser(userId: string): Promise<PublicAuthUser | n
     return null;
   }
 
+  if (user.isSuspended) {
+    return null;
+  }
+
   let providerForResponse: PublicAuthUserProvider | null = null;
   if (user.role === "service_provider") {
     const row = await ServiceProvider.findOne({ userId: user._id }).lean();
@@ -361,6 +368,10 @@ export async function login(
   const match = await bcrypt.compare(password, user.password);
   if (!match) {
     throw new AuthHttpError(401, "Invalid email or password");
+  }
+
+  if (user.isSuspended) {
+    throw new AuthHttpError(403, "This account has been suspended.");
   }
 
   let providerForResponse: PublicAuthUserProvider | null = null;

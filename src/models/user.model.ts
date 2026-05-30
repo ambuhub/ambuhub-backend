@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { normalizeCountryCode } from "../shared/lib/countryCode";
 
-export type UserRole = "client" | "service_provider";
+export type UserRole = "client" | "service_provider" | "admin";
 
 const userSchema = new mongoose.Schema(
   {
@@ -20,10 +20,11 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: {
       type: String,
-      enum: ["client", "service_provider"],
+      enum: ["client", "service_provider", "admin"],
       required: true,
     },
     emailVerified: { type: Boolean, default: false },
+    isSuspended: { type: Boolean, default: false },
     /** Set for clients; null for service providers and legacy users */
     dateOfBirth: { type: Date, default: null },
     /** Marketplace listing IDs the user saved (most recently added first). */

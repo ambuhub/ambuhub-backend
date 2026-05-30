@@ -27,7 +27,7 @@
  *
  *     UserRole:
  *       type: string
- *       enum: [client, service_provider]
+ *       enum: [client, service_provider, admin]
  *
  *     ListingType:
  *       type: string

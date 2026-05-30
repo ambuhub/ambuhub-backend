@@ -5,6 +5,7 @@ import {
   getMyReceiptByOrderHandler,
   getProviderHireBookingsHandler,
   getProviderPersonnelBookingsHandler,
+  getProviderSalesHandler,
   getProviderSalesByMonthHandler,
   listMyOrdersHandler,
   listMyReceiptsHandler,
@@ -43,6 +44,12 @@ router.get(
   authenticate,
   requireServiceProvider,
   getProviderPersonnelBookingsHandler,
+);
+router.get(
+  "/provider/sales",
+  authenticate,
+  requireServiceProvider,
+  getProviderSalesHandler,
 );
 router.get("/me", authenticate, listMyOrdersHandler);
 router.get("/me/:orderId", authenticate, getMyOrderHandler);

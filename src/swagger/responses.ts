@@ -1299,4 +1299,575 @@
  *       properties:
  *         modifiedCount:
  *           type: integer
+ *
+ *     AdminDashboardStats:
+ *       type: object
+ *       required:
+ *         - totalUsers
+ *         - clientCount
+ *         - providerCount
+ *         - activeListings
+ *         - totalListings
+ *         - totalOrders
+ *         - ordersThisMonth
+ *       properties:
+ *         totalUsers:
+ *           type: integer
+ *           description: Clients and service providers (excludes admin accounts)
+ *         clientCount:
+ *           type: integer
+ *           description: Users with role client or legacy patient
+ *         providerCount:
+ *           type: integer
+ *           description: Users with role service_provider
+ *         activeListings:
+ *           type: integer
+ *           description: Services visible on the marketplace (isAvailable true or unset)
+ *         totalListings:
+ *           type: integer
+ *           description: All service documents regardless of availability
+ *         totalOrders:
+ *           type: integer
+ *           description: All paid orders on the platform
+ *         ordersThisMonth:
+ *           type: integer
+ *           description: Orders with paidAt in the current UTC calendar month
+ *       example:
+ *         totalUsers: 42
+ *         clientCount: 35
+ *         providerCount: 7
+ *         activeListings: 18
+ *         totalListings: 21
+ *         totalOrders: 156
+ *         ordersThisMonth: 12
+ *
+ *     AdminDashboardStatsResponse:
+ *       type: object
+ *       required: [stats]
+ *       properties:
+ *         stats:
+ *           $ref: '#/components/schemas/AdminDashboardStats'
+ *       example:
+ *         stats:
+ *           totalUsers: 42
+ *           clientCount: 35
+ *           providerCount: 7
+ *           activeListings: 18
+ *           totalListings: 21
+ *           totalOrders: 156
+ *           ordersThisMonth: 12
+ *
+ *     AdminTransactionsMonthBucket:
+ *       type: object
+ *       properties:
+ *         yearMonth:
+ *           type: string
+ *           description: "YYYY-MM (UTC)"
+ *         label:
+ *           type: string
+ *           description: Short month label
+ *         totalNgn:
+ *           type: number
+ *         orderCount:
+ *           type: integer
+ *           description: Number of paid orders in the month
+ *       example:
+ *         yearMonth: "2026-05"
+ *         label: "May"
+ *         totalNgn: 450000
+ *         orderCount: 18
+ *
+ *     AdminTransactionsByMonthResponse:
+ *       type: object
+ *       required: [year, months]
+ *       properties:
+ *         year:
+ *           type: integer
+ *         months:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminTransactionsMonthBucket'
+ *       example:
+ *         year: 2026
+ *         months:
+ *           - yearMonth: "2026-01"
+ *             label: "Jan"
+ *             totalNgn: 0
+ *             orderCount: 0
+ *           - yearMonth: "2026-05"
+ *             label: "May"
+ *             totalNgn: 450000
+ *             orderCount: 18
+ *
+ *     AdminUserListItem:
+ *       type: object
+ *       required:
+ *         - id
+ *         - firstName
+ *         - lastName
+ *         - email
+ *         - phone
+ *         - countryCode
+ *         - role
+ *         - emailVerified
+ *         - isSuspended
+ *         - createdAt
+ *       properties:
+ *         id:
+ *           type: string
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         email:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *         role:
+ *           type: string
+ *           enum: [client, service_provider, admin]
+ *         emailVerified:
+ *           type: boolean
+ *         isSuspended:
+ *           type: boolean
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         dateOfBirth:
+ *           type: string
+ *           nullable: true
+ *           format: date
+ *
+ *     AdminUsersRoleCounts:
+ *       type: object
+ *       required: [all, client, service_provider, admin]
+ *       properties:
+ *         all:
+ *           type: integer
+ *         client:
+ *           type: integer
+ *         service_provider:
+ *           type: integer
+ *         admin:
+ *           type: integer
+ *
+ *     AdminUsersListResponse:
+ *       type: object
+ *       required: [users, page, limit, total, totalPages, counts]
+ *       properties:
+ *         users:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminUserListItem'
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         counts:
+ *           $ref: '#/components/schemas/AdminUsersRoleCounts'
+ *
+ *     AdminUserProviderProfile:
+ *       type: object
+ *       properties:
+ *         businessName:
+ *           type: string
+ *         physicalAddress:
+ *           type: string
+ *         website:
+ *           type: string
+ *           nullable: true
+ *
+ *     AdminUserTransaction:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         receiptNumber:
+ *           type: string
+ *         subtotalNgn:
+ *           type: number
+ *         currency:
+ *           type: string
+ *         paidAt:
+ *           type: string
+ *           format: date-time
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         lineCount:
+ *           type: integer
+ *         direction:
+ *           type: string
+ *           enum: [purchase, sale]
+ *
+ *     AdminUserDetail:
+ *       allOf:
+ *         - $ref: '#/components/schemas/AdminUserListItem'
+ *         - type: object
+ *           required: [updatedAt, providerProfile, transactions]
+ *           properties:
+ *             updatedAt:
+ *               type: string
+ *               format: date-time
+ *             providerProfile:
+ *               nullable: true
+ *               allOf:
+ *                 - $ref: '#/components/schemas/AdminUserProviderProfile'
+ *             transactions:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/AdminUserTransaction'
+ *
+ *     AdminUserDetailResponse:
+ *       type: object
+ *       required: [user]
+ *       properties:
+ *         user:
+ *           $ref: '#/components/schemas/AdminUserDetail'
+ *
+ *     AdminUserActionRequest:
+ *       type: object
+ *       required: [action]
+ *       properties:
+ *         action:
+ *           type: string
+ *           enum:
+ *             - verify
+ *             - unverify
+ *             - suspend
+ *             - unsuspend
+ *             - promote_to_provider
+ *             - demote_to_client
+ *
+ *     AdminOrderBuyerSummary:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         email:
+ *           type: string
+ *
+ *     AdminOrderListItem:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         receiptNumber:
+ *           type: string
+ *         subtotalNgn:
+ *           type: number
+ *         currency:
+ *           type: string
+ *         paidAt:
+ *           type: string
+ *           format: date-time
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         lineCount:
+ *           type: integer
+ *         primaryLineKind:
+ *           type: string
+ *           enum: [sale, hire, book, mixed]
+ *         buyer:
+ *           $ref: '#/components/schemas/AdminOrderBuyerSummary'
+ *         sellerSummary:
+ *           type: string
+ *
+ *     AdminOrderKindCounts:
+ *       type: object
+ *       required: [all, sale, hire, book]
+ *       properties:
+ *         all:
+ *           type: integer
+ *         sale:
+ *           type: integer
+ *         hire:
+ *           type: integer
+ *         book:
+ *           type: integer
+ *
+ *     AdminOrdersListResponse:
+ *       type: object
+ *       required: [orders, page, limit, total, totalPages, counts]
+ *       properties:
+ *         orders:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminOrderListItem'
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         counts:
+ *           $ref: '#/components/schemas/AdminOrderKindCounts'
+ *
+ *     AdminOrderLineDetail:
+ *       type: object
+ *       properties:
+ *         serviceId:
+ *           type: string
+ *         sellerUserId:
+ *           type: string
+ *           nullable: true
+ *         sellerName:
+ *           type: string
+ *           nullable: true
+ *         lineKind:
+ *           type: string
+ *           nullable: true
+ *           enum: [sale, hire, book, null]
+ *         title:
+ *           type: string
+ *         unitPriceNgn:
+ *           type: number
+ *         quantity:
+ *           type: integer
+ *         lineTotalNgn:
+ *           type: number
+ *         categoryName:
+ *           type: string
+ *         categorySlug:
+ *           type: string
+ *         departmentName:
+ *           type: string
+ *
+ *     AdminOrderDetail:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         receiptNumber:
+ *           type: string
+ *         currency:
+ *           type: string
+ *         subtotalNgn:
+ *           type: number
+ *         paymentProvider:
+ *           type: string
+ *         paystackReference:
+ *           type: string
+ *         paystackSimulated:
+ *           type: boolean
+ *         paidAt:
+ *           type: string
+ *           format: date-time
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         primaryLineKind:
+ *           type: string
+ *           enum: [sale, hire, book, mixed]
+ *         buyer:
+ *           allOf:
+ *             - $ref: '#/components/schemas/AdminOrderBuyerSummary'
+ *             - type: object
+ *               properties:
+ *                 phone:
+ *                   type: string
+ *                 countryCode:
+ *                   type: string
+ *         lines:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminOrderLineDetail'
+ *
+ *     AdminOrderDetailResponse:
+ *       type: object
+ *       required: [order]
+ *       properties:
+ *         order:
+ *           $ref: '#/components/schemas/AdminOrderDetail'
+ *
+ *     CreateConciergeRequestBody:
+ *       type: object
+ *       required:
+ *         - name
+ *         - phone
+ *         - email
+ *         - countryCode
+ *         - categorySlug
+ *         - departmentSlug
+ *         - description
+ *       properties:
+ *         name:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         email:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *           description: ISO 3166-1 alpha-2 country code
+ *         categorySlug:
+ *           type: string
+ *           description: Service category slug or `something-else`
+ *         departmentSlug:
+ *           type: string
+ *           description: Department slug or `something-else`
+ *         description:
+ *           type: string
+ *
+ *     ConciergeRequest:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         name:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         email:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *         categorySlug:
+ *           type: string
+ *         categoryName:
+ *           type: string
+ *         departmentSlug:
+ *           type: string
+ *         departmentName:
+ *           type: string
+ *         description:
+ *           type: string
+ *         status:
+ *           type: string
+ *           enum: [pending, in_progress, resolved]
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     ConciergeRequestResponse:
+ *       type: object
+ *       required: [request]
+ *       properties:
+ *         request:
+ *           $ref: '#/components/schemas/ConciergeRequest'
+ *
+ *     AdminConciergeListItem:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         userId:
+ *           type: string
+ *         name:
+ *           type: string
+ *         email:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         categoryName:
+ *           type: string
+ *         departmentName:
+ *           type: string
+ *         status:
+ *           type: string
+ *           enum: [pending, in_progress, resolved]
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     AdminConciergeDetail:
+ *       allOf:
+ *         - $ref: '#/components/schemas/AdminConciergeListItem'
+ *         - type: object
+ *           properties:
+ *             countryCode:
+ *               type: string
+ *             categorySlug:
+ *               type: string
+ *             departmentSlug:
+ *               type: string
+ *             description:
+ *               type: string
+ *
+ *     AdminConciergeListResponse:
+ *       type: object
+ *       required: [requests, page, limit, total, totalPages, counts]
+ *       properties:
+ *         requests:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminConciergeListItem'
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         counts:
+ *           type: object
+ *           properties:
+ *             all:
+ *               type: integer
+ *             pending:
+ *               type: integer
+ *             in_progress:
+ *               type: integer
+ *             resolved:
+ *               type: integer
+ *
+ *     AdminConciergeDetailResponse:
+ *       type: object
+ *       required: [request]
+ *       properties:
+ *         request:
+ *           $ref: '#/components/schemas/AdminConciergeDetail'
+ *
+ *     AdminNotification:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         type:
+ *           type: string
+ *           enum: [concierge_request_received]
+ *         title:
+ *           type: string
+ *         body:
+ *           type: string
+ *         conciergeRequestId:
+ *           type: string
+ *           nullable: true
+ *         readAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     AdminNotificationsResponse:
+ *       type: object
+ *       required: [notifications]
+ *       properties:
+ *         notifications:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminNotification'
+ *
+ *     AdminUnreadNotificationCountResponse:
+ *       type: object
+ *       required: [count]
+ *       properties:
+ *         count:
+ *           type: integer
  */

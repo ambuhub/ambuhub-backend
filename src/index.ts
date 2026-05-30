@@ -4,6 +4,7 @@ import swaggerUi from "swagger-ui-express";
 import { initCloudinary } from "./config/cloudinary";
 import { connectDatabase } from "./config/database";
 import { swaggerSpec } from "./config/swagger";
+import { ensureAdminFromEnv } from "./modules/admin/ensureAdminFromEnv";
 import { ensureServiceCategoryCatalogSeeded } from "./modules/serviceCategories/serviceCategories.service";
 import { setupRoutes } from "./routes/api";
 import { setupMiddleware } from "./shared/middlewares/middleware";
@@ -37,6 +38,7 @@ const startServer = async () => {
   try {
     initCloudinary();
     await connectDatabase();
+    await ensureAdminFromEnv();
     await ensureServiceCategoryCatalogSeeded();
     const NOTIFICATION_POLL_MS = 60_000;
     setInterval(() => {

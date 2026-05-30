@@ -71,6 +71,129 @@ export type CartDto = {
   items: CartLineDto[];
 };
 
+type PlainCartItem = {
+  serviceId: mongoose.Types.ObjectId;
+  quantity: number;
+};
+
+function normalizeStock(value: unknown): number | null {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+      return null;
+    }
+    return value;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function mapPlainCartItems(
+  items: { serviceId: unknown; quantity: unknown }[],
+): PlainCartItem[] {
+  return items.map((item) => ({
+    serviceId: new mongoose.Types.ObjectId(String(item.serviceId)),
+    quantity: Number(item.quantity),
+  }));
+}
+
+async function persistCartItems(
+  userId: string,
+  items: PlainCartItem[],
+): Promise<void> {
+  const uid = new mongoose.Types.ObjectId(userId);
+  if (items.length === 0) {
+    await Cart.deleteOne({ userId: uid });
+    return;
+  }
+  await Cart.findOneAndUpdate(
+    { userId: uid },
+    { $set: { items } },
+    { upsert: true },
+  );
+}
+
+function cartItemsNeedSync(
+  stored: PlainCartItem[],
+  resolved: PlainCartItem[],
+): boolean {
+  if (stored.length !== resolved.length) {
+    return true;
+  }
+  for (const item of resolved) {
+    const original = stored.find((row) => row.serviceId.equals(item.serviceId));
+    if (!original || original.quantity !== item.quantity) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function resolveSaleCartLines(
+  userId: string,
+  cartItems: PlainCartItem[],
+): Promise<{
+  displayLines: CartLineDto[];
+  checkoutLines: CartCheckoutLine[];
+  validCartItems: PlainCartItem[];
+  invalidServiceIds: string[];
+  invalidMessages: string[];
+}> {
+  const displayLines: CartLineDto[] = [];
+  const checkoutLines: CartCheckoutLine[] = [];
+  const validCartItems: PlainCartItem[] = [];
+  const invalidServiceIds: string[] = [];
+  const invalidMessages: string[] = [];
+
+  for (const row of cartItems) {
+    const sid = row.serviceId.toString();
+    try {
+      const svc = await loadSaleServiceForCart(sid, userId);
+      const meta = mapServiceToLineMeta(svc);
+      const qtyRaw =
+        typeof row.quantity === "number" && row.quantity >= 1 ? row.quantity : 1;
+      const stock = meta.stock ?? 0;
+      const qty = Math.min(qtyRaw, stock);
+      const unit = meta.price ?? 0;
+      const lineTotal = unit * qty;
+
+      validCartItems.push({ serviceId: svc._id, quantity: qty });
+      displayLines.push({
+        ...meta,
+        quantity: qty,
+        lineTotalNgn: lineTotal,
+      });
+      checkoutLines.push({
+        serviceId: svc._id,
+        quantity: qty,
+        title: meta.title,
+        unitPriceNgn: unit,
+        lineTotalNgn: lineTotal,
+        categoryName: meta.category.name,
+        categorySlug: meta.category.slug,
+        departmentName: meta.departmentName,
+      });
+    } catch (err) {
+      invalidServiceIds.push(sid);
+      invalidMessages.push(
+        err instanceof CartHttpError ? err.message : "Item no longer available",
+      );
+    }
+  }
+
+  return {
+    displayLines,
+    checkoutLines,
+    validCartItems,
+    invalidServiceIds,
+    invalidMessages,
+  };
+}
+
 export function mapServiceToLineMeta(
   doc: LeanServiceForCart,
 ): Omit<CartLineDto, "quantity" | "lineTotalNgn"> {
@@ -87,7 +210,7 @@ export function mapServiceToLineMeta(
   }
   const listingType = doc.listingType ?? null;
   const price = typeof doc.price === "number" ? doc.price : null;
-  const stock = typeof doc.stock === "number" ? doc.stock : null;
+  const stock = normalizeStock(doc.stock);
   return {
     serviceId: doc._id.toString(),
     title: doc.title,
@@ -135,12 +258,10 @@ async function loadSaleServiceForCart(
   }
 
   const price = typeof lean.price === "number" ? lean.price : null;
-  const stock = typeof lean.stock === "number" ? lean.stock : null;
-
+  const stock = normalizeStock(lean.stock);
   if (price === null || price < 0) {
-    throw new CartHttpError(400, "This sale listing does not have a valid price");
+    throw new CartHttpError(400, "This listing does not have a valid price");
   }
-
   if (stock === null || stock < 1) {
     throw new CartHttpError(400, "This listing is out of stock");
   }
@@ -308,28 +429,17 @@ export async function getCart(userId: string): Promise<CartDto> {
     return { items: [] };
   }
 
-  const lines: CartLineDto[] = [];
-  for (const row of cart.items) {
-    const sid = row.serviceId?.toString?.() ?? String(row.serviceId);
-    try {
-      const svc = await loadSaleServiceForCart(sid, userId);
-      const meta = mapServiceToLineMeta(svc);
-      const qty = typeof row.quantity === "number" && row.quantity >= 1 ? row.quantity : 1;
-      const maxQty = meta.stock ?? 0;
-      const clamped = Math.min(qty, maxQty);
-      const price = meta.price ?? 0;
-      lines.push({
-        ...meta,
-        quantity: clamped,
-        lineTotalNgn: price * clamped,
-      });
-    } catch {
-      // Stale cart reference (deleted service): skip in response; caller can sync cart later
-      continue;
-    }
+  const storedItems = mapPlainCartItems(cart.items);
+  const resolved = await resolveSaleCartLines(userId, storedItems);
+
+  if (
+    resolved.invalidServiceIds.length > 0 ||
+    cartItemsNeedSync(storedItems, resolved.validCartItems)
+  ) {
+    await persistCartItems(userId, resolved.validCartItems);
   }
 
-  return { items: lines };
+  return { items: resolved.displayLines };
 }
 
 export async function addCartItem(
@@ -338,7 +448,7 @@ export async function addCartItem(
   quantityRaw: unknown,
 ): Promise<CartDto> {
   const svc = await loadSaleServiceForCart(serviceId, userId);
-  const stock = typeof svc.stock === "number" ? svc.stock : 0;
+  const stock = normalizeStock(svc.stock) ?? 0;
 
   let quantity = 1;
   if (quantityRaw !== undefined && quantityRaw !== null) {
@@ -393,7 +503,7 @@ export async function setCartItemQuantity(
   }
 
   const svc = await loadSaleServiceForCart(trimmed, userId);
-  const stock = typeof svc.stock === "number" ? svc.stock : 0;
+  const stock = normalizeStock(svc.stock) ?? 0;
   const quantity = Math.min(n, stock);
 
   const uid = new mongoose.Types.ObjectId(userId);
@@ -456,7 +566,8 @@ export type CartCheckoutLine = {
 };
 
 /**
- * Validates cart and returns resolved lines for checkout (does not mutate).
+ * Validates cart and returns resolved lines for checkout.
+ * Prunes stale lines from the cart document so UI and payment stay in sync.
  */
 export async function resolveCartForCheckout(
   userId: string,
@@ -466,37 +577,37 @@ export async function resolveCartForCheckout(
     throw new CartHttpError(400, "Your cart is empty");
   }
 
-  const lines: CartCheckoutLine[] = [];
-  let subtotal = 0;
+  const storedItems = mapPlainCartItems(cart.items);
+  const resolved = await resolveSaleCartLines(userId, storedItems);
 
-  for (const row of cart.items) {
-    const sid = row.serviceId?.toString?.() ?? String(row.serviceId);
-    const svc = await loadSaleServiceForCart(sid, userId);
-    const meta = mapServiceToLineMeta(svc);
-    const stock = meta.stock ?? 0;
-    const qtyRaw = typeof row.quantity === "number" && row.quantity >= 1 ? row.quantity : 1;
-    const qty = Math.min(qtyRaw, stock);
-    const unit = meta.price ?? 0;
-    const lineTotal = unit * qty;
-    subtotal += lineTotal;
-
-    lines.push({
-      serviceId: svc._id,
-      quantity: qty,
-      title: meta.title,
-      unitPriceNgn: unit,
-      lineTotalNgn: lineTotal,
-      categoryName: meta.category.name,
-      categorySlug: meta.category.slug,
-      departmentName: meta.departmentName,
-    });
+  if (
+    resolved.invalidServiceIds.length > 0 ||
+    cartItemsNeedSync(storedItems, resolved.validCartItems)
+  ) {
+    await persistCartItems(userId, resolved.validCartItems);
   }
 
-  if (lines.length === 0) {
+  if (resolved.invalidServiceIds.length > 0) {
+    const detail =
+      resolved.invalidMessages.length > 0
+        ? [...new Set(resolved.invalidMessages)].join("; ")
+        : resolved.invalidServiceIds.join(", ");
+    throw new CartHttpError(
+      400,
+      `Some items in your cart are no longer available: ${detail}`,
+    );
+  }
+
+  if (resolved.checkoutLines.length === 0) {
     throw new CartHttpError(400, "Your cart is empty");
   }
 
-  return { lines, subtotalNgn: subtotal };
+  const subtotalNgn = resolved.checkoutLines.reduce(
+    (sum, line) => sum + line.lineTotalNgn,
+    0,
+  );
+
+  return { lines: resolved.checkoutLines, subtotalNgn };
 }
 
 export async function clearCart(userId: string): Promise<void> {

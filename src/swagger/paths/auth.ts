@@ -4,7 +4,9 @@
  *   post:
  *     tags: [Auth]
  *     summary: Register a new user
- *     description: Creates a client or service provider account and sets the session cookie.
+ *     description: |
+ *       Creates a client or service provider account and sets the session cookie.
+ *       Admin accounts cannot be created through this endpoint (use env bootstrap or seed script).
  *     requestBody:
  *       required: true
  *       content:
@@ -68,7 +70,9 @@
  *   post:
  *     tags: [Auth]
  *     summary: Log in
- *     description: Authenticates with email/password and sets the session cookie.
+ *     description: |
+ *       Authenticates with email/password and sets the session cookie.
+ *       Admins use the same endpoint; the returned user role may be `admin`.
  *     requestBody:
  *       required: true
  *       content:

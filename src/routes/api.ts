@@ -1,6 +1,8 @@
 import type { Application } from "express";
+import adminRoutes from "../modules/admin/admin.routes";
 import authRoutes from "../modules/auth/auth.routes";
 import cartRoutes from "../modules/cart/cart.routes";
+import conciergeRoutes from "../modules/concierge/concierge.routes";
 import countryCodesRoutes from "../modules/countryCodes/countryCodes.routes";
 import ordersRoutes, { receiptsRouter } from "../modules/orders/orders.routes";
 import serviceCategoriesRoutes from "../modules/serviceCategories/serviceCategories.routes";
@@ -16,7 +18,9 @@ export const setupRoutes = (app: Application): void => {
   });
 
   app.use("/api/auth", authRoutes);
+  app.use("/api/admin", adminRoutes);
   app.use("/api/cart", cartRoutes);
+  app.use("/api/concierge", conciergeRoutes);
   app.use("/api/country-codes", countryCodesRoutes);
   app.use("/api/orders", ordersRoutes);
   app.use("/api/receipts", receiptsRouter);

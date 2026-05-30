@@ -353,6 +353,7 @@ export async function simulatePaystackCheckout(
     return {
       serviceId: l.serviceId,
       sellerUserId,
+      lineKind: "sale" as const,
       title: l.title,
       unitPriceNgn: l.unitPriceNgn,
       quantity: l.quantity,
@@ -389,6 +390,7 @@ export async function simulatePaystackCheckout(
       lines: orderLines.map((l) => ({
         serviceId: l.serviceId,
         sellerUserId: l.sellerUserId,
+        lineKind: l.lineKind,
         title: l.title,
         unitPriceNgn: l.unitPriceNgn,
         quantity: l.quantity,
@@ -946,26 +948,7 @@ export async function listMyReceipts(userId: string): Promise<ReceiptSummaryDto[
   }));
 }
 
-export async function getMyReceiptByOrderId(
-  userId: string,
-  orderId: string,
-): Promise<ReceiptDetailDto> {
-  const trimmed = orderId?.trim() ?? "";
-  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
-    throw new OrdersHttpError(400, "orderId must be a valid ObjectId");
-  }
-
-  const oid = new mongoose.Types.ObjectId(trimmed);
-  const doc = await Receipt.findOne({
-    orderId: oid,
-    userId: new mongoose.Types.ObjectId(userId),
-  }).lean();
-
-  if (!doc) {
-    throw new OrdersHttpError(404, "Receipt not found");
-  }
-
-  type ReceiptLineLean = {
+type ReceiptLineLean = {
     serviceId: mongoose.Types.ObjectId;
     sellerUserId?: mongoose.Types.ObjectId;
     lineKind?: string;
@@ -982,8 +965,23 @@ export async function getMyReceiptByOrderId(
     pricingPeriod?: string;
     hireBillableUnits?: number;
     bookBillableUnits?: number;
-  };
+};
 
+type ReceiptLeanDoc = {
+  _id: mongoose.Types.ObjectId;
+  orderId: mongoose.Types.ObjectId;
+  receiptNumber: string;
+  currency: string;
+  subtotalNgn: number;
+  lines: ReceiptLineLean[];
+  paymentProvider: string;
+  paystackReference: string;
+  issuedAt: Date;
+};
+
+async function mapReceiptLeanDocToDetailDto(
+  doc: ReceiptLeanDoc,
+): Promise<ReceiptDetailDto> {
   const lines: ReceiptLineLean[] = Array.isArray(doc.lines)
     ? (doc.lines as ReceiptLineLean[])
     : [];
@@ -1057,6 +1055,46 @@ export async function getMyReceiptByOrderId(
     paystackReference: doc.paystackReference,
     issuedAt: (doc.issuedAt as Date).toISOString(),
   };
+}
+
+export async function getMyReceiptByOrderId(
+  userId: string,
+  orderId: string,
+): Promise<ReceiptDetailDto> {
+  const trimmed = orderId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new OrdersHttpError(400, "orderId must be a valid ObjectId");
+  }
+
+  const oid = new mongoose.Types.ObjectId(trimmed);
+  const doc = await Receipt.findOne({
+    orderId: oid,
+    userId: new mongoose.Types.ObjectId(userId),
+  }).lean();
+
+  if (!doc) {
+    throw new OrdersHttpError(404, "Receipt not found");
+  }
+
+  return mapReceiptLeanDocToDetailDto(doc as ReceiptLeanDoc);
+}
+
+export async function getReceiptByOrderId(
+  orderId: string,
+): Promise<ReceiptDetailDto> {
+  const trimmed = orderId?.trim() ?? "";
+  if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new OrdersHttpError(400, "orderId must be a valid ObjectId");
+  }
+
+  const oid = new mongoose.Types.ObjectId(trimmed);
+  const doc = await Receipt.findOne({ orderId: oid }).lean();
+
+  if (!doc) {
+    throw new OrdersHttpError(404, "Receipt not found");
+  }
+
+  return mapReceiptLeanDocToDetailDto(doc as ReceiptLeanDoc);
 }
 
 export type ProviderSalesMonthBucket = {
@@ -1545,6 +1583,188 @@ export async function listProviderPersonnelBookings(
   });
 
   rows.sort((a, b) => new Date(b.bookEnd).getTime() - new Date(a.bookEnd).getTime());
+
+  return rows;
+}
+
+function isSaleOrderLine(line: {
+  lineKind?: string;
+  hireStart?: Date;
+  hireEnd?: Date;
+  hireBillableUnits?: number;
+  bookStart?: Date;
+  bookEnd?: Date;
+  bookBillableUnits?: number;
+}): boolean {
+  if (line.lineKind === "sale") {
+    return true;
+  }
+  if (line.lineKind === "hire" || line.lineKind === "book") {
+    return false;
+  }
+  if (
+    line.bookStart != null ||
+    line.bookEnd != null ||
+    typeof line.bookBillableUnits === "number"
+  ) {
+    return false;
+  }
+  if (
+    line.hireStart != null ||
+    line.hireEnd != null ||
+    typeof line.hireBillableUnits === "number"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export type ProviderSaleRowDto = {
+  orderId: string;
+  receiptNumber: string;
+  paidAt: string;
+  serviceId: string;
+  listingTitle: string;
+  quantity: number;
+  unitPriceNgn: number;
+  lineTotalNgn: number;
+  customer: ProviderHireBookingCustomerDto;
+  primaryPhotoUrl?: string;
+};
+
+/**
+ * Flattened sale orders for the provider dashboard: one row per qualifying sale line.
+ * Rows sorted by paidAt descending (most recent first).
+ */
+export async function listProviderSales(
+  providerUserId: string,
+): Promise<ProviderSaleRowDto[]> {
+  const trimmed = providerUserId?.trim() ?? "";
+  if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+    throw new OrdersHttpError(400, "Invalid user id");
+  }
+
+  const providerOid = new mongoose.Types.ObjectId(trimmed);
+  const serviceDocs = await Service.find({ userId: providerOid }).select("_id").lean();
+  const serviceIds = serviceDocs.map((d) => d._id as mongoose.Types.ObjectId);
+  const listingIdSet = new Set(serviceIds.map((id) => id.toString()));
+
+  const elemMatch: Record<string, unknown> = {
+    $or: [{ sellerUserId: providerOid }],
+  };
+  if (serviceIds.length > 0) {
+    (elemMatch.$or as object[]).push({ serviceId: { $in: serviceIds } });
+  }
+
+  const orders = await Order.find({
+    lines: { $elemMatch: elemMatch },
+  })
+    .sort({ paidAt: -1 })
+    .limit(500)
+    .lean();
+
+  type OrderLineLean = {
+    lineKind?: string;
+    sellerUserId?: mongoose.Types.ObjectId;
+    serviceId: mongoose.Types.ObjectId;
+    title: string;
+    unitPriceNgn?: number;
+    quantity: number;
+    lineTotalNgn: number;
+    hireStart?: Date;
+    hireEnd?: Date;
+    hireBillableUnits?: number;
+    bookStart?: Date;
+    bookEnd?: Date;
+    bookBillableUnits?: number;
+  };
+
+  const buyerIds = new Set<string>();
+  const candidateRows: {
+    orderId: mongoose.Types.ObjectId;
+    receiptNumber: string;
+    paidAt: Date;
+    buyerId: mongoose.Types.ObjectId;
+    line: OrderLineLean;
+  }[] = [];
+
+  for (const doc of orders) {
+    const lines = Array.isArray(doc.lines) ? (doc.lines as OrderLineLean[]) : [];
+    const buyerId = doc.userId as mongoose.Types.ObjectId;
+    for (const line of lines) {
+      if (!isSaleOrderLine(line)) {
+        continue;
+      }
+      if (!hireLineBelongsToProvider(line, providerOid, listingIdSet)) {
+        continue;
+      }
+      buyerIds.add(buyerId.toString());
+      candidateRows.push({
+        orderId: doc._id as mongoose.Types.ObjectId,
+        receiptNumber: doc.receiptNumber as string,
+        paidAt: doc.paidAt as Date,
+        buyerId,
+        line,
+      });
+    }
+  }
+
+  const buyers = await User.find({
+    _id: { $in: [...buyerIds].map((id) => new mongoose.Types.ObjectId(id)) },
+  })
+    .select("firstName lastName email phone")
+    .lean();
+
+  const buyerById = new Map<string, ProviderHireBookingCustomerDto>();
+  for (const u of buyers) {
+    const id = (u._id as mongoose.Types.ObjectId).toString();
+    buyerById.set(id, {
+      id,
+      firstName: typeof u.firstName === "string" ? u.firstName : "",
+      lastName: typeof u.lastName === "string" ? u.lastName : "",
+      email: typeof u.email === "string" ? u.email : "",
+      phone: typeof u.phone === "string" ? u.phone : "",
+    });
+  }
+
+  const defaultCustomer = (id: string): ProviderHireBookingCustomerDto => ({
+    id,
+    firstName: "Unknown",
+    lastName: "",
+    email: "",
+    phone: "",
+  });
+
+  const uniqueServiceIds = [
+    ...new Set(candidateRows.map((r) => r.line.serviceId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+  const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(uniqueServiceIds);
+
+  const rows: ProviderSaleRowDto[] = candidateRows.map((r) => {
+    const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
+    const unitPrice =
+      typeof r.line.unitPriceNgn === "number" && r.line.unitPriceNgn >= 0
+        ? r.line.unitPriceNgn
+        : r.line.quantity > 0
+          ? Math.round(r.line.lineTotalNgn / r.line.quantity)
+          : r.line.lineTotalNgn;
+    const urls = photoUrlsByServiceId.get(r.line.serviceId.toString());
+    const primaryPhotoUrl = urls?.[0];
+    return {
+      orderId: r.orderId.toString(),
+      receiptNumber: r.receiptNumber,
+      paidAt: r.paidAt.toISOString(),
+      serviceId: r.line.serviceId.toString(),
+      listingTitle: r.line.title,
+      quantity: r.line.quantity,
+      unitPriceNgn: unitPrice,
+      lineTotalNgn: r.line.lineTotalNgn,
+      customer,
+      ...(primaryPhotoUrl ? { primaryPhotoUrl } : {}),
+    };
+  });
+
+  rows.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
 
   return rows;
 }

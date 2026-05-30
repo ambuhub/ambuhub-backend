@@ -17,7 +17,9 @@
     "seed:orders-2026-provider": "ts-node --transpile-only src/scripts/seed-provider-orders-2026.ts",
     "migrate:hire-stock-pricing": "ts-node --transpile-only src/scripts/migrate-hire-stock-and-pricing-by-category.ts",
     "migrate:hire-location-return": "ts-node --transpile-only src/scripts/migrate-hire-location-and-return-window.ts",
-    "backfill:hire-return-notification-schedules": "ts-node --transpile-only src/scripts/backfill-hire-return-notification-schedules.ts"
+    "backfill:hire-return-notification-schedules": "ts-node --transpile-only src/scripts/backfill-hire-return-notification-schedules.ts",
+    "backfill:order-line-kind-sale": "ts-node --transpile-only src/scripts/backfill-order-line-kind-sale.ts",
+    "seed:admin": "ts-node --transpile-only src/scripts/seed-admin-user.ts"
   },
   "keywords": [
     "Ambulance",

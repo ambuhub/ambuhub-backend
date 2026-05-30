@@ -9,6 +9,7 @@ import {
   listMyReceipts,
   listProviderHireBookings,
   listProviderPersonnelBookings,
+  listProviderSales,
   OrdersHttpError,
   simulateBookPaystackCheckout,
   simulateHirePaystackCheckout,
@@ -118,6 +119,26 @@ export async function getProviderPersonnelBookingsHandler(
     }
     const bookings = await listProviderPersonnelBookings(req.auth.userId);
     res.status(200).json({ bookings });
+  } catch (err: unknown) {
+    if (err instanceof OrdersHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getProviderSalesHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const sales = await listProviderSales(req.auth.userId);
+    res.status(200).json({ sales });
   } catch (err: unknown) {
     if (err instanceof OrdersHttpError) {
       res.status(err.statusCode).json({ message: err.message });
