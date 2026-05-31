@@ -4,6 +4,8 @@ import {
   getAdminConciergeRequestDetailHandler,
   getAdminConciergeRequestsHandler,
   getAdminDashboardStatsHandler,
+  getAdminListingDetailHandler,
+  getAdminListingsHandler,
   getAdminNotificationsHandler,
   getAdminOrderDetailHandler,
   getAdminOrderReceiptHandler,
@@ -12,6 +14,7 @@ import {
   getAdminUnreadNotificationCountHandler,
   getAdminUserDetailHandler,
   getAdminUsersHandler,
+  patchAdminListingAvailabilityHandler,
   patchAdminNotificationReadHandler,
   patchAdminNotificationsReadAllHandler,
   patchAdminUserHandler,
@@ -30,6 +33,12 @@ router.get("/orders/:orderId/receipt", getAdminOrderReceiptHandler);
 router.get("/orders/:orderId", getAdminOrderDetailHandler);
 router.get("/concierge-requests", getAdminConciergeRequestsHandler);
 router.get("/concierge-requests/:requestId", getAdminConciergeRequestDetailHandler);
+router.get("/listings", getAdminListingsHandler);
+router.get("/listings/:serviceId", getAdminListingDetailHandler);
+router.patch(
+  "/listings/:serviceId/availability",
+  patchAdminListingAvailabilityHandler,
+);
 router.get("/notifications/unread-count", getAdminUnreadNotificationCountHandler);
 router.get("/notifications", getAdminNotificationsHandler);
 router.patch("/notifications/read-all", patchAdminNotificationsReadAllHandler);

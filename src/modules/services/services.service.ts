@@ -42,6 +42,10 @@ import {
   type HireReturnWindowInput,
 } from "../../shared/lib/hireReturnWindow";
 import {
+  normalizePrice,
+  normalizeStock,
+} from "../../shared/lib/normalize-listing-fields";
+import {
   normalizeServiceLocation,
   resolveStateProvinceName,
   type ServiceLocationInput,
@@ -191,8 +195,8 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     title: doc.title,
     description: doc.description,
     listingType: doc.listingType ?? null,
-    stock: typeof doc.stock === "number" ? doc.stock : null,
-    price: typeof doc.price === "number" ? doc.price : null,
+    stock: normalizeStock(doc.stock),
+    price: normalizePrice(doc.price),
     pricingPeriod,
     isAvailable: doc.isAvailable !== false,
     departmentSlug: doc.departmentSlug,
@@ -367,21 +371,30 @@ async function loadMarketplaceListingProvider(
   };
 }
 
-export async function getMarketplaceServiceById(
+export type ServiceDetailWithOwnerDto = MarketplaceServiceDetailDto & {
+  ownerUserId: string;
+};
+
+async function loadServiceDetailById(
   serviceId: string,
-): Promise<MarketplaceServiceDetailDto> {
+  options?: { marketplaceOnly?: boolean },
+): Promise<ServiceDetailWithOwnerDto> {
   const trimmed = serviceId?.trim() ?? "";
   if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
     throw new ServicesHttpError(400, "serviceId must be a valid ObjectId");
   }
 
-  const doc = await Service.findOne({
+  const filter: Record<string, unknown> = {
     _id: new mongoose.Types.ObjectId(trimmed),
-    $or: [
+  };
+  if (options?.marketplaceOnly) {
+    filter.$or = [
       { isAvailable: true },
       { isAvailable: { $exists: false } },
-    ],
-  })
+    ];
+  }
+
+  const doc = await Service.findOne(filter)
     .populate<{ serviceCategoryId: PopulatedCategory | null }>(
       "serviceCategoryId",
       "name slug departments",
@@ -401,7 +414,25 @@ export async function getMarketplaceServiceById(
   return {
     ...base,
     provider,
+    ownerUserId: ownerId?.toString() ?? "",
   };
+}
+
+/** Full listing detail including taken-down services (admin, owner tools). */
+export async function getServiceDetailById(
+  serviceId: string,
+): Promise<ServiceDetailWithOwnerDto> {
+  return loadServiceDetailById(serviceId);
+}
+
+export async function getMarketplaceServiceById(
+  serviceId: string,
+): Promise<MarketplaceServiceDetailDto> {
+  const detail = await loadServiceDetailById(serviceId, {
+    marketplaceOnly: true,
+  });
+  const { ownerUserId: _ownerUserId, ...marketplace } = detail;
+  return marketplace;
 }
 
 export async function listFavoriteServicesForUser(

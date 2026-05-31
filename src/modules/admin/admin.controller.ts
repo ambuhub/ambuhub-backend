@@ -17,6 +17,13 @@ import {
   listAdminConciergeRequests,
 } from "./adminConcierge.service";
 import {
+  getAdminListingDetail,
+  listAdminListings,
+  setAdminListingAvailability,
+  type AdminListingStatusFilter,
+  type AdminListingTypeFilter,
+} from "./adminListings.service";
+import {
   AdminNotificationsHttpError,
   getAdminUnreadNotificationCount,
   listAdminNotifications,
@@ -257,6 +264,79 @@ export async function getAdminConciergeRequestDetailHandler(
     res.status(200).json({ request });
   } catch (err) {
     handleAdminError(err, res, "Failed to load concierge request");
+  }
+}
+
+export async function getAdminListingsHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    let page = 1;
+    let limit = 20;
+    const rawPage = req.query.page;
+    const rawLimit = req.query.limit;
+    if (typeof rawPage === "string" && /^\d+$/.test(rawPage)) {
+      page = Math.max(1, parseInt(rawPage, 10));
+    }
+    if (typeof rawLimit === "string" && /^\d+$/.test(rawLimit)) {
+      limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10)));
+    }
+
+    let status: AdminListingStatusFilter = "all";
+    const rawStatus = req.query.status;
+    if (rawStatus === "live" || rawStatus === "taken_down") {
+      status = rawStatus;
+    }
+
+    let listingType: AdminListingTypeFilter = "all";
+    const rawType = req.query.listingType;
+    if (rawType === "sale" || rawType === "hire" || rawType === "book") {
+      listingType = rawType;
+    }
+
+    const q = typeof req.query.q === "string" ? req.query.q : undefined;
+    const result = await listAdminListings({ page, limit, q, status, listingType });
+    res.status(200).json(result);
+  } catch (err) {
+    logger.error("admin listings list failed", { error: err });
+    res.status(500).json({ message: "Failed to load listings" });
+  }
+}
+
+export async function getAdminListingDetailHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const serviceId =
+      typeof req.params.serviceId === "string" ? req.params.serviceId : "";
+    const listing = await getAdminListingDetail(serviceId);
+    res.status(200).json({ listing });
+  } catch (err) {
+    handleAdminError(err, res, "Failed to load listing");
+  }
+}
+
+export async function patchAdminListingAvailabilityHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const serviceId =
+      typeof req.params.serviceId === "string" ? req.params.serviceId : "";
+    const body = req.body as { isAvailable?: unknown };
+    if (typeof body.isAvailable !== "boolean") {
+      res.status(400).json({ message: "isAvailable must be a boolean" });
+      return;
+    }
+    const listing = await setAdminListingAvailability(
+      serviceId,
+      body.isAvailable,
+    );
+    res.status(200).json({ listing });
+  } catch (err) {
+    handleAdminError(err, res, "Failed to update listing availability");
   }
 }
 
