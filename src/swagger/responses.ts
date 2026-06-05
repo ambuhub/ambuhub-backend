@@ -1081,6 +1081,72 @@
  *               email: "jane@example.com"
  *               phone: "+2348000000000"
  *
+ *     ProviderSaleRow:
+ *       type: object
+ *       properties:
+ *         orderId:
+ *           type: string
+ *         receiptNumber:
+ *           type: string
+ *         paidAt:
+ *           type: string
+ *           format: date-time
+ *         serviceId:
+ *           type: string
+ *         listingTitle:
+ *           type: string
+ *         quantity:
+ *           type: integer
+ *         unitPriceNgn:
+ *           type: number
+ *         lineTotalNgn:
+ *           type: number
+ *         customer:
+ *           $ref: '#/components/schemas/ProviderHireBookingCustomer'
+ *         primaryPhotoUrl:
+ *           type: string
+ *           description: First listing photo URL when available
+ *       example:
+ *         orderId: "507f1f77bcf86cd799439030"
+ *         receiptNumber: "RCP-2026-00042"
+ *         paidAt: "2026-05-10T14:30:00.000Z"
+ *         serviceId: "507f1f77bcf86cd799439012"
+ *         listingTitle: "First Aid Kit (Large)"
+ *         quantity: 2
+ *         unitPriceNgn: 15000
+ *         lineTotalNgn: 30000
+ *         customer:
+ *           id: "507f1f77bcf86cd799439011"
+ *           firstName: "Jane"
+ *           lastName: "Doe"
+ *           email: "jane@example.com"
+ *           phone: "+2348000000000"
+ *
+ *     ProviderSalesResponse:
+ *       type: object
+ *       required: [sales]
+ *       properties:
+ *         sales:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/ProviderSaleRow'
+ *       example:
+ *         sales:
+ *           - orderId: "507f1f77bcf86cd799439030"
+ *             receiptNumber: "RCP-2026-00042"
+ *             paidAt: "2026-05-10T14:30:00.000Z"
+ *             serviceId: "507f1f77bcf86cd799439012"
+ *             listingTitle: "First Aid Kit (Large)"
+ *             quantity: 2
+ *             unitPriceNgn: 15000
+ *             lineTotalNgn: 30000
+ *             customer:
+ *               id: "507f1f77bcf86cd799439011"
+ *               firstName: "Jane"
+ *               lastName: "Doe"
+ *               email: "jane@example.com"
+ *               phone: "+2348000000000"
+ *
  *     Wallet:
  *       type: object
  *       properties:

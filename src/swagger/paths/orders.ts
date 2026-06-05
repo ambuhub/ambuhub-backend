@@ -150,6 +150,35 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *
+ * /api/orders/provider/sales:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Provider sale orders
+ *     description: |
+ *       Service provider only. Returns one row per qualifying sale line on the provider's
+ *       listings, sorted by paidAt descending (most recent first).
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: Sale orders list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProviderSalesResponse'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Not a service provider
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
  * /api/orders/provider/bookings:
  *   get:
  *     tags: [Orders]
