@@ -143,9 +143,9 @@ type OrderLineDoc = {
   sellerUserId?: mongoose.Types.ObjectId;
   lineKind?: string;
   title: string;
-  unitPriceNgn: number;
+  unitPrice: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   categoryName: string;
   categorySlug: string;
   departmentName: string;
@@ -161,9 +161,9 @@ function receiptLinesFromOrder(lines: OrderLineDoc[]) {
     sellerUserId: l.sellerUserId,
     lineKind: l.lineKind,
     title: l.title,
-    unitPriceNgn: l.unitPriceNgn,
+    unitPrice: l.unitPrice,
     quantity: l.quantity,
-    lineTotalNgn: l.lineTotalNgn,
+    lineTotal: l.lineTotal,
     categoryName: l.categoryName,
     departmentName: l.departmentName,
     hireStart: l.hireStart,
@@ -192,7 +192,7 @@ async function phase2OrdersAndReceipts(
     "lines.lineKind": "hire",
     "lines.hireEnd": { $exists: true },
   })
-    .select("_id lines subtotalNgn")
+    .select("_id lines subtotal")
     .cursor();
 
   for await (const order of cursor) {
@@ -200,7 +200,7 @@ async function phase2OrdersAndReceipts(
     const orderId = order._id as mongoose.Types.ObjectId;
     const lines = (order.lines ?? []) as OrderLineDoc[];
     let orderChanged = false;
-    let subtotalNgn = 0;
+    let subtotal = 0;
 
     const newLines: OrderLineDoc[] = [];
 
@@ -210,7 +210,7 @@ async function phase2OrdersAndReceipts(
         (line.hireStart != null && line.hireEnd != null);
 
       if (!isHire || line.hireEnd == null) {
-        subtotalNgn += line.lineTotalNgn;
+        subtotal += line.lineTotal;
         newLines.push(line);
         continue;
       }
@@ -220,7 +220,7 @@ async function phase2OrdersAndReceipts(
           `Order ${orderId.toHexString()} line "${line.title}": missing hireStart, skip`,
         );
         linesSkipped += 1;
-        subtotalNgn += line.lineTotalNgn;
+        subtotal += line.lineTotal;
         newLines.push(line);
         continue;
       }
@@ -232,7 +232,7 @@ async function phase2OrdersAndReceipts(
           `Order ${orderId.toHexString()} line "${line.title}": service ${svcId} not found, skip`,
         );
         linesSkipped += 1;
-        subtotalNgn += line.lineTotalNgn;
+        subtotal += line.lineTotal;
         newLines.push(line);
         continue;
       }
@@ -246,7 +246,7 @@ async function phase2OrdersAndReceipts(
           `Order ${orderId.toHexString()} line "${line.title}": no pricingPeriod, skip`,
         );
         linesSkipped += 1;
-        subtotalNgn += line.lineTotalNgn;
+        subtotal += line.lineTotal;
         newLines.push(line);
         continue;
       }
@@ -271,7 +271,7 @@ async function phase2OrdersAndReceipts(
           `Order ${orderId.toHexString()} line "${line.title}": snap failed (${msg}), skip`,
         );
         linesSkipped += 1;
-        subtotalNgn += line.lineTotalNgn;
+        subtotal += line.lineTotal;
         newLines.push(line);
         continue;
       }
@@ -289,23 +289,23 @@ async function phase2OrdersAndReceipts(
           `Order ${orderId.toHexString()} line "${line.title}": billable units failed (${msg}), skip`,
         );
         linesSkipped += 1;
-        subtotalNgn += line.lineTotalNgn;
+        subtotal += line.lineTotal;
         newLines.push(line);
         continue;
       }
 
-      const unitPriceNgn =
-        typeof line.unitPriceNgn === "number" && line.unitPriceNgn >= 0
-          ? line.unitPriceNgn
+      const unitPrice =
+        typeof line.unitPrice === "number" && line.unitPrice >= 0
+          ? line.unitPrice
           : svc.price;
       const quantity = line.quantity >= 1 ? line.quantity : 1;
-      const lineTotalNgn = Math.round(
-        unitPriceNgn * quantity * hireBillableUnits,
+      const lineTotal = Math.round(
+        unitPrice * quantity * hireBillableUnits,
       );
 
       const endChanged = newEnd.getTime() !== oldEnd.getTime();
       const unitsChanged = line.hireBillableUnits !== hireBillableUnits;
-      const totalChanged = line.lineTotalNgn !== lineTotalNgn;
+      const totalChanged = line.lineTotal !== lineTotal;
 
       if (endChanged || unitsChanged || totalChanged) {
         orderChanged = true;
@@ -317,26 +317,26 @@ async function phase2OrdersAndReceipts(
         hireEnd: newEnd,
         pricingPeriod,
         hireBillableUnits,
-        unitPriceNgn,
-        lineTotalNgn,
+        unitPrice,
+        lineTotal,
       };
-      subtotalNgn += lineTotalNgn;
+      subtotal += lineTotal;
       newLines.push(updatedLine);
     }
 
-    const subtotalChanged = order.subtotalNgn !== subtotalNgn;
+    const subtotalChanged = order.subtotal !== subtotal;
     if (!orderChanged && !subtotalChanged) {
       continue;
     }
 
     if (DRY_RUN) {
       console.log(
-        `[DRY_RUN] order ${orderId.toHexString()}: subtotalNgn ${order.subtotalNgn} → ${subtotalNgn}, hire lines adjusted ${linesAdjusted}`,
+        `[DRY_RUN] order ${orderId.toHexString()}: subtotal ${order.subtotal} → ${subtotal}, hire lines adjusted ${linesAdjusted}`,
       );
     } else {
       await Order.updateOne(
         { _id: orderId },
-        { $set: { lines: newLines, subtotalNgn } },
+        { $set: { lines: newLines, subtotal } },
       );
     }
     ordersUpdated += 1;
@@ -347,7 +347,7 @@ async function phase2OrdersAndReceipts(
     if (receipt) {
       if (DRY_RUN) {
         console.log(
-          `[DRY_RUN] receipt for order ${orderId.toHexString()}: update lines + subtotalNgn`,
+          `[DRY_RUN] receipt for order ${orderId.toHexString()}: update lines + subtotal`,
         );
       } else {
         await Receipt.updateOne(
@@ -355,7 +355,7 @@ async function phase2OrdersAndReceipts(
           {
             $set: {
               lines: receiptLinesFromOrder(newLines),
-              subtotalNgn,
+              subtotal,
             },
           },
         );

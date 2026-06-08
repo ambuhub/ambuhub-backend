@@ -6,6 +6,7 @@ import { ServiceProvider } from "../../models/serviceProvider.model";
 import { ensureWallet } from "../wallet/wallet.service";
 import { logger } from "../../shared/lib/logger";
 import { normalizeCountryCode } from "../../shared/lib/countryCode";
+import { isMarketplaceCountry } from "../../shared/currency/countryCurrency";
 
 const SALT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
@@ -228,6 +229,12 @@ export async function register(
   }
 
   if (role === "service_provider") {
+    if (!isMarketplaceCountry(normalizedCountryCode)) {
+      throw new AuthHttpError(
+        400,
+        "Service providers must register with Nigeria (NG) or Ghana (GH) as their country",
+      );
+    }
     if (!businessName?.trim() || !physicalAddress?.trim()) {
       throw new AuthHttpError(
         400,

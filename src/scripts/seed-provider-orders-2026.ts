@@ -35,9 +35,9 @@ type SeedLine = {
   serviceId: mongoose.Types.ObjectId;
   sellerUserId: mongoose.Types.ObjectId;
   title: string;
-  unitPriceNgn: number;
+  unitPrice: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   categoryName: string;
   categorySlug: string;
   departmentName: string;
@@ -149,9 +149,9 @@ function buildLines(
       serviceId: sid,
       sellerUserId: providerId,
       title: `Seed order item ${sid.toString().slice(-6)}`,
-      unitPriceNgn: unit,
+      unitPrice: unit,
       quantity: qty,
-      lineTotalNgn: total,
+      lineTotal: total,
       categoryName: catName,
       categorySlug: catSlug,
       departmentName: "Seed department",
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
     for (let i = 0; i < ORDERS_PER_MONTH; i += 1) {
       const paidAt = randomPaidAtUtc(YEAR, monthIdx);
       const lines = buildLines(providerId, serviceIds, catMeta);
-      const subtotalNgn = lines.reduce((s, l) => s + l.lineTotalNgn, 0);
+      const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
       const receiptNumber = await generateUniqueReceiptNumber();
       const paystackReference =
         SEED_REF_PREFIX + generateSimulatedPaystackReference();
@@ -224,7 +224,7 @@ async function main(): Promise<void> {
         userId: buyerUserId,
         receiptNumber,
         currency: "NGN",
-        subtotalNgn,
+        subtotal,
         lines,
         paymentProvider: "paystack_simulated",
         paystackReference,
@@ -240,14 +240,14 @@ async function main(): Promise<void> {
         userId: buyerUserId,
         receiptNumber,
         currency: "NGN",
-        subtotalNgn,
+        subtotal,
         lines: lines.map((l) => ({
           serviceId: l.serviceId,
           sellerUserId: l.sellerUserId,
           title: l.title,
-          unitPriceNgn: l.unitPriceNgn,
+          unitPrice: l.unitPrice,
           quantity: l.quantity,
-          lineTotalNgn: l.lineTotalNgn,
+          lineTotal: l.lineTotal,
           categoryName: l.categoryName,
           departmentName: l.departmentName,
         })),

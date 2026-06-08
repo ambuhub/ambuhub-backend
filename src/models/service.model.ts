@@ -74,6 +74,11 @@ const serviceSchema = new mongoose.Schema(
       default: null,
       min: 0,
     },
+    currency: {
+      type: String,
+      enum: ["NGN", "GHS"],
+      default: "NGN",
+    },
     pricingPeriod: {
       type: String,
       enum: [...pricingPeriodValues],
@@ -110,6 +115,9 @@ serviceSchema.pre("validate", function () {
     return;
   }
   this.set("countryCode", n);
+  if (n !== "NG" && n !== "GH") {
+    this.invalidate("countryCode", "Service country must be NG or GH");
+  }
 });
 
 serviceSchema.index({ userId: 1, createdAt: -1 });

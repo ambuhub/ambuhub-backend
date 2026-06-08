@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { parseSupportedCurrency } from "../../shared/currency/types";
 import { logger } from "../../shared/lib/logger";
 import {
   AdminHttpError,
@@ -30,14 +31,42 @@ import {
   markAdminNotificationRead,
   markAllAdminNotificationsRead,
 } from "./adminNotifications.service";
+import {
+  AdminCategoriesHttpError,
+  createAdminCategory,
+  listAdminCategories,
+  updateAdminCategoryBySlug,
+} from "./adminCategories.service";
 
 function handleAdminError(err: unknown, res: Response, fallback: string): void {
-  if (err instanceof AdminHttpError || err instanceof AdminNotificationsHttpError) {
+  if (
+    err instanceof AdminHttpError ||
+    err instanceof AdminNotificationsHttpError ||
+    err instanceof AdminCategoriesHttpError
+  ) {
     res.status(err.statusCode).json({ message: err.message });
     return;
   }
   logger.error(fallback, { error: err });
   res.status(500).json({ message: fallback });
+}
+
+function parseOptionalImageUrlBodyField(
+  value: unknown,
+  fieldName: string,
+  res: Response,
+): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined) {
+    return undefined;
+  }
+  res.status(400).json({ message: `${fieldName} must be a string or null` });
+  return undefined;
 }
 
 export async function getAdminDashboardStatsHandler(
@@ -67,8 +96,11 @@ export async function getAdminTransactionsByMonthHandler(
         year = y;
       }
     }
-    const months = await getAdminTransactionsByMonth(year);
-    res.status(200).json({ year, months });
+    const currency = parseSupportedCurrency(
+      typeof req.query.currency === "string" ? req.query.currency : undefined,
+    );
+    const months = await getAdminTransactionsByMonth(year, currency);
+    res.status(200).json({ year, currency, months });
   } catch (err) {
     logger.error("admin transactions by month failed", { error: err });
     res.status(500).json({ message: "Failed to load transactions by month" });
@@ -417,5 +449,210 @@ export async function patchAdminNotificationsReadAllHandler(
     res.status(200).json({ modifiedCount });
   } catch (err) {
     handleAdminError(err, res, "Failed to mark notifications read");
+  }
+}
+
+export async function getAdminCategoriesHandler(
+  _req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const categories = await listAdminCategories();
+    res.status(200).json({ categories });
+  } catch (err) {
+    handleAdminError(err, res, "Failed to load categories");
+  }
+}
+
+export async function postAdminCategoryHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const body = req.body as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(body, "slug")) {
+      res.status(400).json({
+        message: "slug must not be sent; it is generated from name on the server",
+      });
+      return;
+    }
+    const name = body.name;
+    const departments = body.departments;
+    if (typeof name !== "string") {
+      res.status(400).json({ message: "name is required" });
+      return;
+    }
+    if (
+      departments !== undefined &&
+      departments !== null &&
+      !Array.isArray(departments)
+    ) {
+      res.status(400).json({ message: "departments must be an array when provided" });
+      return;
+    }
+    const deptList =
+      departments === undefined || departments === null ? [] : departments;
+    const parsedDepts: { name: string }[] = [];
+    for (const d of deptList) {
+      if (d === null || typeof d !== "object") {
+        res.status(400).json({ message: "Each department must be an object" });
+        return;
+      }
+      const o = d as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(o, "slug")) {
+        res.status(400).json({
+          message:
+            "department slug must not be sent; it is generated from name on the server",
+        });
+        return;
+      }
+      if (typeof o.name !== "string") {
+        res.status(400).json({ message: "Each department needs a string name" });
+        return;
+      }
+      parsedDepts.push({ name: o.name });
+    }
+    const createInput: {
+      name: string;
+      departments?: { name: string }[];
+      thumbnailUrl?: string | null;
+      bannerUrl?: string | null;
+    } = {
+      name,
+      departments: parsedDepts.length > 0 ? parsedDepts : undefined,
+    };
+    if (Object.prototype.hasOwnProperty.call(body, "thumbnailUrl")) {
+      const thumbnailUrl = parseOptionalImageUrlBodyField(
+        body.thumbnailUrl,
+        "thumbnailUrl",
+        res,
+      );
+      if (res.headersSent) {
+        return;
+      }
+      createInput.thumbnailUrl = thumbnailUrl ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "bannerUrl")) {
+      const bannerUrl = parseOptionalImageUrlBodyField(
+        body.bannerUrl,
+        "bannerUrl",
+        res,
+      );
+      if (res.headersSent) {
+        return;
+      }
+      createInput.bannerUrl = bannerUrl ?? null;
+    }
+    const category = await createAdminCategory(createInput);
+    res.status(201).json({ category });
+  } catch (err) {
+    handleAdminError(err, res, "Failed to create category");
+  }
+}
+
+export async function patchAdminCategoryHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const raw = req.params.slug;
+    const slug = Array.isArray(raw) ? raw[0] : raw;
+    if (!slug?.trim()) {
+      res.status(400).json({ message: "Slug is required" });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const input: {
+      name?: string;
+      addDepartments?: { name: string }[];
+      updateDepartments?: { slug: string; name: string }[];
+      thumbnailUrl?: string | null;
+      bannerUrl?: string | null;
+    } = {};
+
+    if (Object.prototype.hasOwnProperty.call(body, "name")) {
+      if (typeof body.name !== "string") {
+        res.status(400).json({ message: "name must be a string" });
+        return;
+      }
+      input.name = body.name;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "addDepartments")) {
+      const rawAdd = body.addDepartments;
+      if (!Array.isArray(rawAdd)) {
+        res.status(400).json({ message: "addDepartments must be an array" });
+        return;
+      }
+      const parsed: { name: string }[] = [];
+      for (const item of rawAdd) {
+        if (item === null || typeof item !== "object") {
+          res.status(400).json({ message: "Each addDepartments entry must be an object" });
+          return;
+        }
+        const o = item as Record<string, unknown>;
+        if (typeof o.name !== "string") {
+          res.status(400).json({ message: "Each addDepartments entry needs a string name" });
+          return;
+        }
+        parsed.push({ name: o.name });
+      }
+      input.addDepartments = parsed;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "updateDepartments")) {
+      const rawUpdate = body.updateDepartments;
+      if (!Array.isArray(rawUpdate)) {
+        res.status(400).json({ message: "updateDepartments must be an array" });
+        return;
+      }
+      const parsed: { slug: string; name: string }[] = [];
+      for (const item of rawUpdate) {
+        if (item === null || typeof item !== "object") {
+          res.status(400).json({
+            message: "Each updateDepartments entry must be an object",
+          });
+          return;
+        }
+        const o = item as Record<string, unknown>;
+        if (typeof o.slug !== "string" || typeof o.name !== "string") {
+          res.status(400).json({
+            message: "Each updateDepartments entry needs slug and name strings",
+          });
+          return;
+        }
+        parsed.push({ slug: o.slug, name: o.name });
+      }
+      input.updateDepartments = parsed;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "thumbnailUrl")) {
+      const thumbnailUrl = parseOptionalImageUrlBodyField(
+        body.thumbnailUrl,
+        "thumbnailUrl",
+        res,
+      );
+      if (res.headersSent) {
+        return;
+      }
+      input.thumbnailUrl = thumbnailUrl ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "bannerUrl")) {
+      const bannerUrl = parseOptionalImageUrlBodyField(
+        body.bannerUrl,
+        "bannerUrl",
+        res,
+      );
+      if (res.headersSent) {
+        return;
+      }
+      input.bannerUrl = bannerUrl ?? null;
+    }
+
+    const category = await updateAdminCategoryBySlug(slug, input);
+    res.status(200).json({ category });
+  } catch (err) {
+    handleAdminError(err, res, "Failed to update category");
   }
 }

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Service } from "../../models/service.model";
 import { ServiceProvider } from "../../models/serviceProvider.model";
 import { User } from "../../models/user.model";
+import { parseSupportedCurrency } from "../../shared/currency/types";
 import {
   getServiceDetailById,
   ServicesHttpError,
@@ -37,6 +38,7 @@ export type AdminListingListItem = {
   isLive: boolean;
   stock: number | null;
   price: number | null;
+  currency: string;
   updatedAt: string;
   createdAt: string;
 };
@@ -96,6 +98,7 @@ type LeanListingRow = {
   isAvailable?: boolean;
   stock?: number | null;
   price?: number | null;
+  currency?: string;
   userId: PopulatedUser | mongoose.Types.ObjectId;
   serviceCategoryId: PopulatedCategory | mongoose.Types.ObjectId | null;
   createdAt: Date;
@@ -164,6 +167,7 @@ function mapListingListItem(
     isLive: doc.isAvailable !== false,
     stock: typeof doc.stock === "number" ? doc.stock : null,
     price: typeof doc.price === "number" ? doc.price : null,
+    currency: parseSupportedCurrency(doc.currency, "NGN"),
     updatedAt: doc.updatedAt.toISOString(),
     createdAt: doc.createdAt.toISOString(),
   };
@@ -310,6 +314,7 @@ function mapServiceDetailToAdminListing(
     isLive: detail.isAvailable,
     stock: detail.stock,
     price: detail.price,
+    currency: detail.currency,
     pricingPeriod: detail.pricingPeriod,
     photoUrls: detail.photoUrls,
     countryCode: detail.countryCode,

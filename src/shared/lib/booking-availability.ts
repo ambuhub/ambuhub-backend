@@ -8,6 +8,9 @@ import {
 import {
   assertSameLagosCalendarDay,
   buildHourlySegments,
+  getScheduledWindowsForDate,
+  hasValidHourlySchedule,
+  lagosDateString,
   type HourlyBookingSchedule,
 } from "./hourly-booking-schedule";
 import { getLagosDateParts, lagosWallClockToDate } from "./hireReturnWindow";
@@ -155,6 +158,156 @@ export function isRangeWithinFreeRanges(
   return false;
 }
 
+function segmentsForScheduleDate(
+  schedule: HourlyBookingSchedule,
+  dateStr: string,
+): TimeInterval[] {
+  const { windows } = getScheduledWindowsForDate(schedule, dateStr);
+  const [y, m, d] = dateStr.split("-").map((x) => parseInt(x, 10));
+  const segments: TimeInterval[] = [];
+  for (const w of windows) {
+    const start = lagosWallClockToDate(y, m, d, w.timeStart);
+    const end = lagosWallClockToDate(y, m, d, w.timeEnd);
+    if (end.getTime() > start.getTime()) {
+      segments.push({ start, end });
+    }
+  }
+  return segments;
+}
+
+function enumerateInclusiveLagosDateStrings(startDate: string, endDate: string): string[] {
+  if (startDate > endDate) {
+    return [];
+  }
+  const dates: string[] = [];
+  let cur = startDate;
+  let guard = 0;
+  while (cur <= endDate && guard < 120) {
+    guard++;
+    dates.push(cur);
+    const [y, m, d] = cur.split("-").map((x) => parseInt(x, 10));
+    const next = new Date(lagosWallClockToDate(y, m, d, "12:00").getTime() + 86400000);
+    cur = lagosDateString(next);
+  }
+  return dates;
+}
+
+/** Lagos YYYY-MM-DD strings in range that have at least one free schedule segment. */
+export function listBillableDatesInScheduleRange(
+  bookStart: Date,
+  bookEnd: Date,
+  schedule: HourlyBookingSchedule,
+  busy: TimeInterval[],
+  gapMinutes: number,
+): string[] {
+  const startDate = lagosDateString(bookStart);
+  const endDate = lagosDateString(bookEnd);
+  const dates = enumerateInclusiveLagosDateStrings(startDate, endDate);
+  if (dates.length === 0) {
+    return [];
+  }
+  const billable: string[] = [];
+  for (const dateStr of dates) {
+    const daySegments = segmentsForScheduleDate(schedule, dateStr);
+    if (daySegments.length === 0) {
+      continue;
+    }
+    const dayFree = computeFreeRanges(daySegments, busy, gapMinutes);
+    if (dayFree.length > 0) {
+      billable.push(dateStr);
+    }
+  }
+  return billable;
+}
+
+/** Count billable days in range; unavailable days are excluded. */
+export function countBillableDaysInScheduleRange(
+  bookStart: Date,
+  bookEnd: Date,
+  schedule: HourlyBookingSchedule,
+  busy: TimeInterval[],
+  gapMinutes: number,
+): number {
+  return listBillableDatesInScheduleRange(
+    bookStart,
+    bookEnd,
+    schedule,
+    busy,
+    gapMinutes,
+  ).length;
+}
+
+function instantsForBillableScheduleDate(
+  schedule: HourlyBookingSchedule,
+  dateStr: string,
+): { start: Date; end: Date } | null {
+  const { windows } = getScheduledWindowsForDate(schedule, dateStr);
+  if (windows.length === 0) {
+    return null;
+  }
+  const [y, m, d] = dateStr.split("-").map((x) => parseInt(x, 10));
+  const firstWindow = windows[0];
+  const lastWindow = windows[windows.length - 1];
+  const start = lagosWallClockToDate(y, m, d, firstWindow.timeStart);
+  const end = lagosWallClockToDate(y, m, d, lastWindow.timeEnd);
+  if (end.getTime() <= start.getTime()) {
+    return null;
+  }
+  return { start, end };
+}
+
+/** First/last billable day instants using per-day schedule windows (for provider-facing order bounds). */
+export function resolveBillableBookRangeInstants(
+  bookStart: Date,
+  bookEnd: Date,
+  schedule: HourlyBookingSchedule,
+  busy: TimeInterval[],
+  gapMinutes: number,
+): { start: Date; end: Date } | null {
+  const billableDates = listBillableDatesInScheduleRange(
+    bookStart,
+    bookEnd,
+    schedule,
+    busy,
+    gapMinutes,
+  );
+  if (billableDates.length === 0) {
+    return null;
+  }
+  const firstDay = instantsForBillableScheduleDate(schedule, billableDates[0]);
+  const lastDay = instantsForBillableScheduleDate(
+    schedule,
+    billableDates[billableDates.length - 1],
+  );
+  if (!firstDay || !lastDay) {
+    return null;
+  }
+  if (lastDay.end.getTime() <= firstDay.start.getTime()) {
+    return null;
+  }
+  return { start: firstDay.start, end: lastDay.end };
+}
+
+/** Provider dashboard display: snap to first/last schedule-open days (ignore busy). */
+export function resolveProviderDisplayBookRange(
+  bookStart: Date,
+  bookEnd: Date,
+  schedule: HourlyBookingSchedule,
+): { start: Date; end: Date } | null {
+  return resolveBillableBookRangeInstants(bookStart, bookEnd, schedule, [], 0);
+}
+
+/** Daily multi-day: valid when at least one day in range is billable. */
+export function isDailyBookRangeWithinSchedule(
+  bookStart: Date,
+  bookEnd: Date,
+  schedule: HourlyBookingSchedule,
+  busy: TimeInterval[],
+  gapMinutes: number,
+): boolean {
+  return countBillableDaysInScheduleRange(bookStart, bookEnd, schedule, busy, gapMinutes) >= 1;
+}
+
 export function rangesConflictWithBusy(
   bookStart: Date,
   bookEnd: Date,
@@ -243,15 +396,18 @@ export async function assertBookRangeAvailable(
     throw new Error("Selected time conflicts with an existing booking");
   }
 
-  if (pricingPeriod === "hourly") {
-    const schedule = options.hourlySchedule;
-    if (!schedule) {
-      throw new Error("This listing has no hourly booking schedule");
+  const schedule = options.hourlySchedule;
+  if (schedule && hasValidHourlySchedule(schedule)) {
+    if (pricingPeriod === "hourly") {
+      assertSameLagosCalendarDay(bookStart, bookEnd);
+      const segments = buildHourlySegments(schedule, from, to);
+      const free = computeFreeRanges(segments, busy, gapMinutes);
+      if (!isRangeWithinFreeRanges(bookStart, bookEnd, free)) {
+        throw new Error("Selected time is outside available booking hours");
+      }
+      return;
     }
-    assertSameLagosCalendarDay(bookStart, bookEnd);
-    const segments = buildHourlySegments(schedule, from, to);
-    const free = computeFreeRanges(segments, busy, gapMinutes);
-    if (!isRangeWithinFreeRanges(bookStart, bookEnd, free)) {
+    if (!isDailyBookRangeWithinSchedule(bookStart, bookEnd, schedule, busy, gapMinutes)) {
       throw new Error("Selected time is outside available booking hours");
     }
     return;
@@ -262,6 +418,13 @@ export async function assertBookRangeAvailable(
     throw new Error("This listing has no booking schedule");
   }
   assertBookRangeInWindow(bookStart, bookEnd, window, pricingPeriod);
+  if (pricingPeriod === "daily") {
+    const syntheticSchedule: HourlyBookingSchedule = { default: window, overrides: [] };
+    if (!isDailyBookRangeWithinSchedule(bookStart, bookEnd, syntheticSchedule, busy, gapMinutes)) {
+      throw new Error("Selected time is outside available booking hours");
+    }
+    return;
+  }
   const weekly = buildWeeklySegments(window, from, to);
   const free = computeFreeRanges(weekly, busy, gapMinutes);
   if (!isRangeWithinFreeRanges(bookStart, bookEnd, free)) {

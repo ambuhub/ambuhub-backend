@@ -18,9 +18,9 @@ type LeanLine = {
   serviceId: mongoose.Types.ObjectId;
   sellerUserId?: mongoose.Types.ObjectId | null;
   title: string;
-  unitPriceNgn: number;
+  unitPrice: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   categoryName: string;
   categorySlug?: string;
   departmentName: string;
@@ -40,7 +40,11 @@ async function backfillLines(
     return null;
   }
   const uniqueIds = [
-    ...new Map(missing.map((l) => [l.serviceId.toString(), l.serviceId])).values(),
+    ...new Map(
+      missing
+        .filter((l) => l.serviceId != null)
+        .map((l) => [l.serviceId.toString(), l.serviceId]),
+    ).values(),
   ];
   const svcs = await Service.find({ _id: { $in: uniqueIds } })
     .select("_id userId")
@@ -56,6 +60,10 @@ async function backfillLines(
   let changed = false;
   const next = lines.map((l) => {
     if (!lineNeedsSeller(l)) {
+      return l;
+    }
+    if (!l.serviceId) {
+      console.warn(`${collectionLabel} ${docId}: line missing serviceId`);
       return l;
     }
     const uid = sellerByService.get(l.serviceId.toString());

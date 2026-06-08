@@ -4,7 +4,7 @@
   "description": "Ambulance service",
   "main": "index.js",
   "scripts": {
-    "test": "npx tsx --test src/shared/lib/hourly-booking-schedule.test.ts src/shared/lib/booking-gap.test.ts",
+    "test": "npx tsx --test src/shared/lib/hourly-booking-schedule.test.ts src/shared/lib/booking-gap.test.ts src/shared/lib/booking-availability.test.ts",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
     "build:clean": "rm -rf dist && tsc",
@@ -17,6 +17,9 @@
     "seed:orders-2026-provider": "ts-node --transpile-only src/scripts/seed-provider-orders-2026.ts",
     "migrate:hire-stock-pricing": "ts-node --transpile-only src/scripts/migrate-hire-stock-and-pricing-by-category.ts",
     "migrate:hire-location-return": "ts-node --transpile-only src/scripts/migrate-hire-location-and-return-window.ts",
+    "migrate:dual-wallets": "ts-node --transpile-only src/scripts/migrate-dual-wallets.ts",
+    "migrate:native-amount-fields": "ts-node --transpile-only src/scripts/migrate-native-amount-fields.ts",
+    "backfill:provider-wallets-from-orders": "ts-node --transpile-only src/scripts/backfill-provider-wallets-from-orders.ts",
     "backfill:hire-return-notification-schedules": "ts-node --transpile-only src/scripts/backfill-hire-return-notification-schedules.ts",
     "backfill:order-line-kind-sale": "ts-node --transpile-only src/scripts/backfill-order-line-kind-sale.ts",
     "seed:admin": "ts-node --transpile-only src/scripts/seed-admin-user.ts"

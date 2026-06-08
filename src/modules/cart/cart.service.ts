@@ -5,19 +5,13 @@ import { ServiceCategory } from "../../models/serviceCategory.model";
 import { parseBookingWindowFromDoc } from "../../shared/lib/bookingWindow";
 import { normalizeStock } from "../../shared/lib/normalize-listing-fields";
 import {
-  hasValidHourlySchedule,
   resolveHourlyBookingSchedule,
   type HourlyBookingSchedule,
 } from "../../shared/lib/hourly-booking-schedule";
 import type { ListingType, PricingPeriod } from "../services/services.service";
+import { parseSupportedCurrency, type SupportedCurrency } from "../../shared/currency/types";
 
-const HIRE_PRICING_PERIODS = new Set<PricingPeriod>([
-  "hourly",
-  "daily",
-  "weekly",
-  "monthly",
-  "yearly",
-]);
+const HIRE_PRICING_PERIODS = new Set<PricingPeriod>(["daily"]);
 
 export class CartHttpError extends Error {
   constructor(
@@ -43,6 +37,7 @@ type LeanServiceForCart = {
   listingType?: ListingType | null;
   stock?: number | null;
   price?: number | null;
+  currency?: string | null;
   pricingPeriod?: string | null;
   isAvailable?: boolean | null;
   departmentSlug: string;
@@ -65,11 +60,13 @@ export type CartLineDto = {
   departmentName: string;
   category: { slug: string; name: string };
   photoUrls: string[];
-  lineTotalNgn: number | null;
+  lineTotal: number | null;
+  currency: SupportedCurrency;
 };
 
 export type CartDto = {
   items: CartLineDto[];
+  currency: SupportedCurrency | null;
 };
 
 type PlainCartItem = {
@@ -143,21 +140,25 @@ async function resolveSaleCartLines(
         typeof row.quantity === "number" && row.quantity >= 1 ? row.quantity : 1;
       const stock = meta.stock ?? 0;
       const qty = Math.min(qtyRaw, stock);
-      const unit = meta.price ?? 0;
+      const listingCurrency = parseSupportedCurrency(svc.currency, "NGN");
+      const listingPrice = meta.price ?? 0;
+      const unit = listingPrice;
       const lineTotal = unit * qty;
 
       validCartItems.push({ serviceId: svc._id, quantity: qty });
       displayLines.push({
         ...meta,
         quantity: qty,
-        lineTotalNgn: lineTotal,
+        lineTotal,
+        currency: listingCurrency,
       });
       checkoutLines.push({
         serviceId: svc._id,
         quantity: qty,
         title: meta.title,
-        unitPriceNgn: unit,
-        lineTotalNgn: lineTotal,
+        unitPrice: unit,
+        lineTotal,
+        currency: listingCurrency,
         categoryName: meta.category.name,
         categorySlug: meta.category.slug,
         departmentName: meta.departmentName,
@@ -181,7 +182,7 @@ async function resolveSaleCartLines(
 
 export function mapServiceToLineMeta(
   doc: LeanServiceForCart,
-): Omit<CartLineDto, "quantity" | "lineTotalNgn"> {
+): Omit<CartLineDto, "quantity" | "lineTotal" | "currency"> {
   const cat = doc.serviceCategoryId;
   const deptSlug = doc.departmentSlug;
   let departmentName = deptSlug;
@@ -295,17 +296,13 @@ export async function loadHireServiceForCheckout(
   const price = typeof lean.price === "number" ? lean.price : null;
   const stock = typeof lean.stock === "number" ? lean.stock : null;
   const rawPeriod = lean.pricingPeriod;
-  const pricingPeriod: PricingPeriod | null =
+  const pricingPeriod: PricingPeriod =
     typeof rawPeriod === "string" && HIRE_PRICING_PERIODS.has(rawPeriod as PricingPeriod)
       ? (rawPeriod as PricingPeriod)
-      : null;
+      : "daily";
 
   if (price === null || price < 0) {
     throw new CartHttpError(400, "This hire listing does not have a valid price");
-  }
-
-  if (pricingPeriod === null) {
-    throw new CartHttpError(400, "This hire listing does not have a valid pricing period");
   }
 
   if (stock === null || stock < 1) {
@@ -361,38 +358,27 @@ export async function loadBookServiceForCheckout(
 
   const price = typeof lean.price === "number" ? lean.price : null;
   const rawPeriod = lean.pricingPeriod;
-  const pricingPeriod: PricingPeriod | null =
+  const pricingPeriod: PricingPeriod =
     typeof rawPeriod === "string" && HIRE_PRICING_PERIODS.has(rawPeriod as PricingPeriod)
       ? (rawPeriod as PricingPeriod)
-      : null;
+      : "daily";
 
   if (price === null || price < 0) {
     throw new CartHttpError(400, "This listing does not have a valid booking price");
   }
 
-  if (pricingPeriod === null) {
-    throw new CartHttpError(400, "This listing does not have a valid pricing period");
-  }
-
   const bookingWindow = parseBookingWindowFromDoc(lean.bookingWindow);
-  const hourlyBookingSchedule = resolveHourlyBookingSchedule(
-    lean.hourlyBookingSchedule,
-    lean.bookingWindow,
-  );
-
-  if (pricingPeriod === "hourly") {
-    if (!hasValidHourlySchedule(hourlyBookingSchedule)) {
-      throw new CartHttpError(
-        400,
-        "This listing has no hourly booking schedule. Booking is unavailable until the provider updates it.",
-      );
-    }
-  } else if (!bookingWindow) {
+  if (!bookingWindow) {
     throw new CartHttpError(
       400,
       "This listing has no booking schedule. Booking is unavailable until the provider updates it.",
     );
   }
+
+  const hourlyBookingSchedule = resolveHourlyBookingSchedule(
+    lean.hourlyBookingSchedule,
+    lean.bookingWindow,
+  );
 
   const bookingGapMinutes =
     typeof lean.bookingGapMinutes === "number" && lean.bookingGapMinutes >= 0
@@ -411,7 +397,7 @@ export async function loadBookServiceForCheckout(
 export async function getCart(userId: string): Promise<CartDto> {
   const cart = await Cart.findOne({ userId: new mongoose.Types.ObjectId(userId) }).lean();
   if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
-    return { items: [] };
+    return { items: [], currency: null };
   }
 
   const storedItems = mapPlainCartItems(cart.items);
@@ -424,7 +410,10 @@ export async function getCart(userId: string): Promise<CartDto> {
     await persistCartItems(userId, resolved.validCartItems);
   }
 
-  return { items: resolved.displayLines };
+  return {
+    items: resolved.displayLines,
+    currency: resolved.checkoutLines[0]?.currency ?? null,
+  };
 }
 
 export async function addCartItem(
@@ -445,10 +434,25 @@ export async function addCartItem(
   }
   quantity = Math.min(quantity, stock);
 
+  const newCurrency = parseSupportedCurrency(svc.currency, "NGN");
   const uid = new mongoose.Types.ObjectId(userId);
   const sid = svc._id;
 
   const cart = await Cart.findOne({ userId: uid }).lean();
+  if (cart && Array.isArray(cart.items) && cart.items.length > 0) {
+    const existingId = cart.items[0]?.serviceId;
+    if (existingId) {
+      const existingSvc = await Service.findById(existingId).select("currency").lean();
+      const existingCurrency = parseSupportedCurrency(existingSvc?.currency, "NGN");
+      if (existingCurrency !== newCurrency) {
+        throw new CartHttpError(
+          400,
+          "All cart items must use the same currency. Clear your cart before adding listings from another country.",
+        );
+      }
+    }
+  }
+
   type PlainItem = { serviceId: mongoose.Types.ObjectId; quantity: number };
   const items: PlainItem[] = (cart?.items ?? []).map((i) => ({
     serviceId: new mongoose.Types.ObjectId(String(i.serviceId)),
@@ -523,7 +527,7 @@ export async function removeCartItem(userId: string, serviceId: string): Promise
   const uid = new mongoose.Types.ObjectId(userId);
   const cart = await Cart.findOne({ userId: uid }).lean();
   if (!cart) {
-    return { items: [] };
+    return { items: [], currency: null };
   }
 
   type PlainItem = { serviceId: mongoose.Types.ObjectId; quantity: number };
@@ -543,8 +547,9 @@ export type CartCheckoutLine = {
   serviceId: mongoose.Types.ObjectId;
   quantity: number;
   title: string;
-  unitPriceNgn: number;
-  lineTotalNgn: number;
+  unitPrice: number;
+  lineTotal: number;
+  currency: SupportedCurrency;
   categoryName: string;
   categorySlug: string;
   departmentName: string;
@@ -556,7 +561,7 @@ export type CartCheckoutLine = {
  */
 export async function resolveCartForCheckout(
   userId: string,
-): Promise<{ lines: CartCheckoutLine[]; subtotalNgn: number }> {
+): Promise<{ lines: CartCheckoutLine[]; subtotal: number; currency: SupportedCurrency }> {
   const cart = await Cart.findOne({ userId: new mongoose.Types.ObjectId(userId) }).lean();
   if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
     throw new CartHttpError(400, "Your cart is empty");
@@ -587,12 +592,16 @@ export async function resolveCartForCheckout(
     throw new CartHttpError(400, "Your cart is empty");
   }
 
-  const subtotalNgn = resolved.checkoutLines.reduce(
-    (sum, line) => sum + line.lineTotalNgn,
+  const subtotal = resolved.checkoutLines.reduce(
+    (sum, line) => sum + line.lineTotal,
     0,
   );
 
-  return { lines: resolved.checkoutLines, subtotalNgn };
+  return {
+    lines: resolved.checkoutLines,
+    subtotal,
+    currency: resolved.checkoutLines[0].currency,
+  };
 }
 
 export async function clearCart(userId: string): Promise<void> {

@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { Order } from "../../models/order.model";
+import { parseSupportedCurrency, type SupportedCurrency } from "../../shared/currency/types";
 import { Receipt } from "../../models/receipt.model";
 import { Service } from "../../models/service.model";
 import { User } from "../../models/user.model";
@@ -20,8 +21,14 @@ import {
   resolveCanonicalHireEnd,
 } from "../../shared/lib/hireReturnWindow";
 import type { PricingPeriod } from "../services/services.service";
-import { assertBookRangeAvailable } from "../../shared/lib/booking-availability";
+import { assertBookRangeAvailable, resolveProviderDisplayBookRange } from "../../shared/lib/booking-availability";
+import { parseBookingWindowFromDoc } from "../../shared/lib/bookingWindow";
 import {
+  resolveHourlyBookingSchedule,
+  type HourlyBookingSchedule,
+} from "../../shared/lib/hourly-booking-schedule";
+import {
+  resolveBookCheckoutRange,
   computeHireBillableUnits,
   parseBookCalendarRange,
   parseHireInstantRange,
@@ -47,15 +54,23 @@ export class OrdersHttpError extends Error {
   }
 }
 
+async function resolveListingCurrency(currencyInput: unknown): Promise<SupportedCurrency> {
+  return parseSupportedCurrency(currencyInput, "NGN");
+}
+
+function listingUnitPrice(price: number): number {
+  return price;
+}
+
 export type OrderLineDto = {
   serviceId: string;
   /** Present on orders created after seller snapshot was added. */
   sellerUserId?: string;
   lineKind?: "sale" | "hire" | "book";
   title: string;
-  unitPriceNgn: number;
+  unitPrice: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   categoryName: string;
   categorySlug: string;
   departmentName: string;
@@ -73,7 +88,7 @@ export type OrderLineDto = {
 export type OrderSummaryDto = {
   id: string;
   receiptNumber: string;
-  subtotalNgn: number;
+  subtotal: number;
   currency: string;
   paidAt: string;
   createdAt: string;
@@ -84,7 +99,7 @@ export type OrderDetailDto = {
   id: string;
   receiptNumber: string;
   currency: string;
-  subtotalNgn: number;
+  subtotal: number;
   lines: OrderLineDto[];
   paymentProvider: string;
   paystackReference: string;
@@ -96,7 +111,7 @@ export type OrderDetailDto = {
 function mapOrderSummary(doc: {
   _id: mongoose.Types.ObjectId;
   receiptNumber: string;
-  subtotalNgn: number;
+  subtotal: number;
   currency: string;
   paidAt: Date;
   createdAt: Date;
@@ -105,7 +120,7 @@ function mapOrderSummary(doc: {
   return {
     id: doc._id.toString(),
     receiptNumber: doc.receiptNumber,
-    subtotalNgn: doc.subtotalNgn,
+    subtotal: doc.subtotal,
     currency: doc.currency,
     paidAt: doc.paidAt.toISOString(),
     createdAt: doc.createdAt.toISOString(),
@@ -117,15 +132,15 @@ function mapOrderDetail(doc: {
   _id: mongoose.Types.ObjectId;
   receiptNumber: string;
   currency: string;
-  subtotalNgn: number;
+  subtotal: number;
   lines: {
     serviceId: mongoose.Types.ObjectId;
     sellerUserId?: mongoose.Types.ObjectId;
     lineKind?: "sale" | "hire" | "book";
     title: string;
-    unitPriceNgn: number;
+    unitPrice: number;
     quantity: number;
-    lineTotalNgn: number;
+    lineTotal: number;
     categoryName: string;
     categorySlug: string;
     departmentName: string;
@@ -147,7 +162,7 @@ function mapOrderDetail(doc: {
     id: doc._id.toString(),
     receiptNumber: doc.receiptNumber,
     currency: doc.currency,
-    subtotalNgn: doc.subtotalNgn,
+    subtotal: doc.subtotal,
     lines: doc.lines.map((l) => ({
       serviceId: l.serviceId.toString(),
       ...(l.sellerUserId
@@ -155,9 +170,9 @@ function mapOrderDetail(doc: {
         : {}),
       ...(l.lineKind ? { lineKind: l.lineKind } : {}),
       title: l.title,
-      unitPriceNgn: l.unitPriceNgn,
+      unitPrice: l.unitPrice,
       quantity: l.quantity,
-      lineTotalNgn: l.lineTotalNgn,
+      lineTotal: l.lineTotal,
       categoryName: l.categoryName,
       categorySlug: l.categorySlug,
       departmentName: l.departmentName,
@@ -247,7 +262,7 @@ export async function listMyOrders(userId: string): Promise<OrderSummaryDto[]> {
       r as {
         _id: mongoose.Types.ObjectId;
         receiptNumber: string;
-        subtotalNgn: number;
+        subtotal: number;
         currency: string;
         paidAt: Date;
         createdAt: Date;
@@ -287,7 +302,7 @@ export type SimulateCheckoutResult = {
 export async function simulatePaystackCheckout(
   userId: string,
 ): Promise<SimulateCheckoutResult> {
-  const { lines, subtotalNgn } = await resolveCartForCheckout(userId);
+  const { lines, subtotal, currency: orderCurrency } = await resolveCartForCheckout(userId);
 
   const decremented: { serviceId: mongoose.Types.ObjectId; qty: number }[] = [];
 
@@ -355,9 +370,9 @@ export async function simulatePaystackCheckout(
       sellerUserId,
       lineKind: "sale" as const,
       title: l.title,
-      unitPriceNgn: l.unitPriceNgn,
+      unitPrice: l.unitPrice,
       quantity: l.quantity,
-      lineTotalNgn: l.lineTotalNgn,
+      lineTotal: l.lineTotal,
       categoryName: l.categoryName,
       categorySlug: l.categorySlug,
       departmentName: l.departmentName,
@@ -371,8 +386,8 @@ export async function simulatePaystackCheckout(
     const orderDoc = await Order.create({
       userId: new mongoose.Types.ObjectId(userId),
       receiptNumber,
-      currency: "NGN",
-      subtotalNgn,
+      currency: orderCurrency,
+      subtotal,
       lines: orderLines,
       paymentProvider: "paystack_simulated",
       paystackReference,
@@ -385,16 +400,16 @@ export async function simulatePaystackCheckout(
       orderId: orderDoc._id,
       userId: new mongoose.Types.ObjectId(userId),
       receiptNumber,
-      currency: "NGN",
-      subtotalNgn,
+      currency: orderCurrency,
+      subtotal,
       lines: orderLines.map((l) => ({
         serviceId: l.serviceId,
         sellerUserId: l.sellerUserId,
         lineKind: l.lineKind,
         title: l.title,
-        unitPriceNgn: l.unitPriceNgn,
+        unitPrice: l.unitPrice,
         quantity: l.quantity,
-        lineTotalNgn: l.lineTotalNgn,
+        lineTotal: l.lineTotal,
         categoryName: l.categoryName,
         departmentName: l.departmentName,
       })),
@@ -477,7 +492,9 @@ export async function simulateHirePaystackCheckout(
 
   const meta = mapServiceToLineMeta(svc);
   const pricingPeriod = svc.pricingPeriod;
-  const unitPrice = typeof svc.price === "number" && svc.price >= 0 ? svc.price : 0;
+  const rawUnitPrice =
+    typeof svc.price === "number" && svc.price >= 0 ? svc.price : 0;
+  const unitPrice = listingUnitPrice(rawUnitPrice);
 
   let range: { start: Date; end: Date };
   try {
@@ -507,14 +524,16 @@ export async function simulateHirePaystackCheckout(
     throw new OrdersHttpError(400, msg);
   }
 
-  const lineTotalNgn = Math.round(unitPrice * quantity * hireBillableUnits);
+  const listingCurrency = await resolveListingCurrency(svc.currency);
+  const lineTotal = Math.round(unitPrice * quantity * hireBillableUnits);
 
   const walletLine: CartCheckoutLine = {
     serviceId: svc._id,
     quantity,
     title: meta.title,
-    unitPriceNgn: unitPrice,
-    lineTotalNgn,
+    unitPrice: unitPrice,
+    lineTotal,
+    currency: listingCurrency,
     categoryName: meta.category.name,
     categorySlug: meta.category.slug,
     departmentName: meta.departmentName,
@@ -560,9 +579,9 @@ export async function simulateHirePaystackCheckout(
       sellerUserId,
       lineKind: "hire" as const,
       title: meta.title,
-      unitPriceNgn: unitPrice,
+      unitPrice: unitPrice,
       quantity,
-      lineTotalNgn,
+      lineTotal,
       categoryName: meta.category.name,
       categorySlug: meta.category.slug,
       departmentName: meta.departmentName,
@@ -573,10 +592,11 @@ export async function simulateHirePaystackCheckout(
     },
   ];
 
-  const subtotalNgn = lineTotalNgn;
+  const subtotal = lineTotal;
   const receiptNumber = await generateUniqueReceiptNumber();
   const paystackReference = generateSimulatedPaystackReference();
   const paidAt = new Date();
+  const orderCurrency = listingCurrency;
 
   let createdOrderId: mongoose.Types.ObjectId | null = null;
   let walletApplied: AppliedWalletCredit[] = [];
@@ -586,9 +606,9 @@ export async function simulateHirePaystackCheckout(
     sellerUserId: l.sellerUserId,
     lineKind: l.lineKind,
     title: l.title,
-    unitPriceNgn: l.unitPriceNgn,
+    unitPrice: l.unitPrice,
     quantity: l.quantity,
-    lineTotalNgn: l.lineTotalNgn,
+    lineTotal: l.lineTotal,
     categoryName: l.categoryName,
     departmentName: l.departmentName,
     hireStart: l.hireStart,
@@ -601,8 +621,8 @@ export async function simulateHirePaystackCheckout(
     const orderDoc = await Order.create({
       userId: new mongoose.Types.ObjectId(userId),
       receiptNumber,
-      currency: "NGN",
-      subtotalNgn,
+      currency: orderCurrency,
+      subtotal,
       lines: orderLines,
       paymentProvider: "paystack_simulated",
       paystackReference,
@@ -615,8 +635,8 @@ export async function simulateHirePaystackCheckout(
       orderId: orderDoc._id,
       userId: new mongoose.Types.ObjectId(userId),
       receiptNumber,
-      currency: "NGN",
-      subtotalNgn,
+      currency: orderCurrency,
+      subtotal,
       lines: receiptLines,
       paymentProvider: "paystack_simulated",
       paystackReference,
@@ -699,27 +719,17 @@ export async function simulateBookPaystackCheckout(
 
   const meta = mapServiceToLineMeta(svc);
   const pricingPeriod = svc.pricingPeriod;
-  const unitPrice = typeof svc.price === "number" && svc.price >= 0 ? svc.price : 0;
+  const rawUnitPrice =
+    typeof svc.price === "number" && svc.price >= 0 ? svc.price : 0;
+  const unitPrice = listingUnitPrice(rawUnitPrice);
   const quantity = 1;
 
   let range: { start: Date; end: Date };
   try {
-    if (
-      pricingPeriod !== "hourly" &&
-      /^\d{4}-\d{2}-\d{2}$/.test(bookStartRaw.trim()) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(bookEndRaw.trim())
-    ) {
-      if (!svc.bookingWindow) {
-        throw new OrdersHttpError(400, "This listing has no booking schedule");
-      }
-      range = parseBookCalendarRange(
-        bookStartRaw,
-        bookEndRaw,
-        svc.bookingWindow,
-      );
-    } else {
-      range = parseHireInstantRange(pricingPeriod, bookStartRaw, bookEndRaw);
+    if (!svc.bookingWindow) {
+      throw new OrdersHttpError(400, "This listing has no booking schedule");
     }
+    range = parseBookCalendarRange(bookStartRaw, bookEndRaw, svc.bookingWindow);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Invalid booking dates";
     throw new OrdersHttpError(400, msg);
@@ -743,26 +753,36 @@ export async function simulateBookPaystackCheckout(
     throw new OrdersHttpError(status, msg);
   }
 
-  let bookBillableUnits: number;
+  let checkoutRange: Awaited<ReturnType<typeof resolveBookCheckoutRange>>;
   try {
-    bookBillableUnits = computeHireBillableUnits(pricingPeriod, range.start, range.end);
+    checkoutRange = await resolveBookCheckoutRange(
+      svc._id.toString(),
+      range,
+      svc.bookingWindow,
+      svc.hourlyBookingSchedule,
+      svc.bookingGapMinutes,
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Invalid booking window";
     throw new OrdersHttpError(400, msg);
   }
 
-  if (bookBillableUnits < 1) {
+  if (!checkoutRange) {
     throw new OrdersHttpError(400, "Booking must span at least one billable unit");
   }
 
-  const lineTotalNgn = Math.round(unitPrice * quantity * bookBillableUnits);
+  const { billableUnits: bookBillableUnits, effectiveStart, effectiveEnd } = checkoutRange;
+
+  const listingCurrency = await resolveListingCurrency(svc.currency);
+  const lineTotal = Math.round(unitPrice * quantity * bookBillableUnits);
 
   const walletLine: CartCheckoutLine = {
     serviceId: svc._id,
     quantity,
     title: meta.title,
-    unitPriceNgn: unitPrice,
-    lineTotalNgn,
+    unitPrice: unitPrice,
+    lineTotal,
+    currency: listingCurrency,
     categoryName: meta.category.name,
     categorySlug: meta.category.slug,
     departmentName: meta.departmentName,
@@ -776,23 +796,24 @@ export async function simulateBookPaystackCheckout(
       sellerUserId,
       lineKind: "book" as const,
       title: meta.title,
-      unitPriceNgn: unitPrice,
+      unitPrice: unitPrice,
       quantity,
-      lineTotalNgn,
+      lineTotal,
       categoryName: meta.category.name,
       categorySlug: meta.category.slug,
       departmentName: meta.departmentName,
-      bookStart: range.start,
-      bookEnd: range.end,
+      bookStart: effectiveStart,
+      bookEnd: effectiveEnd,
       pricingPeriod,
       bookBillableUnits,
     },
   ];
 
-  const subtotalNgn = lineTotalNgn;
+  const subtotal = lineTotal;
   const receiptNumber = await generateUniqueReceiptNumber();
   const paystackReference = generateSimulatedPaystackReference();
   const paidAt = new Date();
+  const orderCurrency = listingCurrency;
 
   let createdOrderId: mongoose.Types.ObjectId | null = null;
   let walletApplied: AppliedWalletCredit[] = [];
@@ -802,9 +823,9 @@ export async function simulateBookPaystackCheckout(
     sellerUserId: l.sellerUserId,
     lineKind: l.lineKind,
     title: l.title,
-    unitPriceNgn: l.unitPriceNgn,
+    unitPrice: l.unitPrice,
     quantity: l.quantity,
-    lineTotalNgn: l.lineTotalNgn,
+    lineTotal: l.lineTotal,
     categoryName: l.categoryName,
     departmentName: l.departmentName,
     bookStart: l.bookStart,
@@ -834,8 +855,8 @@ export async function simulateBookPaystackCheckout(
     const orderDoc = await Order.create({
       userId: new mongoose.Types.ObjectId(userId),
       receiptNumber,
-      currency: "NGN",
-      subtotalNgn,
+      currency: orderCurrency,
+      subtotal,
       lines: orderLines,
       paymentProvider: "paystack_simulated",
       paystackReference,
@@ -848,8 +869,8 @@ export async function simulateBookPaystackCheckout(
       orderId: orderDoc._id,
       userId: new mongoose.Types.ObjectId(userId),
       receiptNumber,
-      currency: "NGN",
-      subtotalNgn,
+      currency: orderCurrency,
+      subtotal,
       lines: receiptLines,
       paymentProvider: "paystack_simulated",
       paystackReference,
@@ -894,7 +915,7 @@ export type ReceiptSummaryDto = {
   id: string;
   orderId: string;
   receiptNumber: string;
-  subtotalNgn: number;
+  subtotal: number;
   currency: string;
   issuedAt: string;
 };
@@ -904,9 +925,9 @@ export type ReceiptLineDto = {
   sellerUserId?: string;
   lineKind?: "sale" | "hire" | "book";
   title: string;
-  unitPriceNgn: number;
+  unitPrice: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   categoryName: string;
   departmentName: string;
   hireStart?: string;
@@ -925,7 +946,7 @@ export type ReceiptDetailDto = {
   orderId: string;
   receiptNumber: string;
   currency: string;
-  subtotalNgn: number;
+  subtotal: number;
   lines: ReceiptLineDto[];
   paymentProvider: string;
   paystackReference: string;
@@ -942,7 +963,7 @@ export async function listMyReceipts(userId: string): Promise<ReceiptSummaryDto[
     id: (r._id as mongoose.Types.ObjectId).toString(),
     orderId: (r.orderId as mongoose.Types.ObjectId).toString(),
     receiptNumber: r.receiptNumber,
-    subtotalNgn: r.subtotalNgn,
+    subtotal: r.subtotal,
     currency: r.currency,
     issuedAt: (r.issuedAt as Date).toISOString(),
   }));
@@ -953,9 +974,9 @@ type ReceiptLineLean = {
     sellerUserId?: mongoose.Types.ObjectId;
     lineKind?: string;
     title: string;
-    unitPriceNgn: number;
+    unitPrice: number;
     quantity: number;
-    lineTotalNgn: number;
+    lineTotal: number;
     categoryName: string;
     departmentName: string;
     hireStart?: Date;
@@ -972,7 +993,7 @@ type ReceiptLeanDoc = {
   orderId: mongoose.Types.ObjectId;
   receiptNumber: string;
   currency: string;
-  subtotalNgn: number;
+  subtotal: number;
   lines: ReceiptLineLean[];
   paymentProvider: string;
   paystackReference: string;
@@ -1005,7 +1026,7 @@ async function mapReceiptLeanDocToDetailDto(
     orderId: (doc.orderId as mongoose.Types.ObjectId).toString(),
     receiptNumber: doc.receiptNumber,
     currency: doc.currency,
-    subtotalNgn: doc.subtotalNgn,
+    subtotal: doc.subtotal,
     lines: lines.map((l) => {
       const sid = l.serviceId as mongoose.Types.ObjectId;
       const sellerUid = l.sellerUserId as mongoose.Types.ObjectId | undefined;
@@ -1026,22 +1047,16 @@ async function mapReceiptLeanDocToDetailDto(
         ...(sellerUid ? { sellerUserId: sellerUid.toString() } : {}),
         ...(lineKind ? { lineKind } : {}),
         title: l.title,
-        unitPriceNgn: l.unitPriceNgn,
+        unitPrice: l.unitPrice,
         quantity: l.quantity,
-        lineTotalNgn: l.lineTotalNgn,
+        lineTotal: l.lineTotal,
         categoryName: l.categoryName,
         departmentName: l.departmentName,
         ...(hireStart ? { hireStart: hireStart.toISOString() } : {}),
         ...(hireEnd ? { hireEnd: hireEnd.toISOString() } : {}),
         ...(bookStart ? { bookStart: bookStart.toISOString() } : {}),
         ...(bookEnd ? { bookEnd: bookEnd.toISOString() } : {}),
-        ...(rawPeriod === "hourly" ||
-        rawPeriod === "daily" ||
-        rawPeriod === "weekly" ||
-        rawPeriod === "monthly" ||
-        rawPeriod === "yearly"
-          ? { pricingPeriod: rawPeriod as PricingPeriod }
-          : {}),
+        ...(rawPeriod === "daily" ? { pricingPeriod: rawPeriod as PricingPeriod } : {}),
         ...(typeof l.hireBillableUnits === "number"
           ? { hireBillableUnits: l.hireBillableUnits }
           : {}),
@@ -1100,7 +1115,7 @@ export async function getReceiptByOrderId(
 export type ProviderSalesMonthBucket = {
   yearMonth: string;
   label: string;
-  totalNgn: number;
+  total: number;
 };
 
 function calendarYearMonthsUtc(year: number): string[] {
@@ -1125,13 +1140,14 @@ function shortMonthLabelUtc(yearMonth: string): string {
 }
 
 /**
- * For a calendar year (UTC), sums each qualifying order's `subtotalNgn` by
- * `paidAt` month. An order qualifies if any line has `sellerUserId` = provider
- * or `serviceId` is one of the provider's current listings ($elemMatch, no $expr).
+ * For a calendar year (UTC), sums this provider's line totals by `paidAt` month
+ * for orders paid in the given currency. An order qualifies if any line has
+ * `sellerUserId` = provider or `serviceId` is one of the provider's listings.
  */
 export async function getProviderSalesByMonth(
   providerUserId: string,
   year: number,
+  currency: SupportedCurrency,
 ): Promise<ProviderSalesMonthBucket[]> {
   const trimmed = providerUserId?.trim() ?? "";
   const buckets = calendarYearMonthsUtc(year);
@@ -1140,7 +1156,7 @@ export async function getProviderSalesByMonth(
     return buckets.map((ym) => ({
       yearMonth: ym,
       label: shortMonthLabelUtc(ym),
-      totalNgn: 0,
+      total: 0,
     }));
   }
 
@@ -1148,7 +1164,7 @@ export async function getProviderSalesByMonth(
     return buckets.map((ym) => ({
       yearMonth: ym,
       label: shortMonthLabelUtc(ym),
-      totalNgn: 0,
+      total: 0,
     }));
   }
 
@@ -1192,35 +1208,60 @@ export async function getProviderSalesByMonth(
   ];
   const orderQualifyMatch = { $or: orderQualifyOr };
 
+  const providerLineMatch: object = {
+    $or: [
+      { "lines.sellerUserId": providerOid },
+      ...(serviceIds.length > 0 ? [{ "lines.serviceId": { $in: serviceIds } }] : []),
+      {
+        $expr: {
+          $eq: [
+            { $toString: { $ifNull: ["$lines.sellerUserId", ""] } },
+            providerOid.toString(),
+          ],
+        },
+      },
+    ],
+  };
+
   const agg = await Order.aggregate<{
     _id: string;
-    totalNgn: number;
+    total: number;
   }>([
     {
       $match: {
         paidAt: { $gte: rangeStart, $lt: rangeEndExclusive },
       },
     },
+    {
+      $addFields: {
+        resolvedCurrency: { $ifNull: ["$currency", "NGN"] },
+      },
+    },
+    { $match: { resolvedCurrency: currency } },
     { $match: orderQualifyMatch },
+    { $unwind: "$lines" },
+    { $match: providerLineMatch },
     {
       $group: {
         _id: {
           $dateToString: { format: "%Y-%m", date: "$paidAt", timezone: "UTC" },
         },
-        totalNgn: { $sum: "$subtotalNgn" },
+        total: {
+          $sum: { $ifNull: ["$lines.lineTotal", "$lines.lineTotalNgn"] },
+        },
       },
     },
   ]);
 
   const totals = new Map<string, number>();
   for (const row of agg) {
-    totals.set(row._id, typeof row.totalNgn === "number" ? row.totalNgn : 0);
+    totals.set(row._id, typeof row.total === "number" ? row.total : 0);
   }
 
   return buckets.map((ym) => ({
     yearMonth: ym,
     label: shortMonthLabelUtc(ym),
-    totalNgn: totals.get(ym) ?? 0,
+    total: totals.get(ym) ?? 0,
   }));
 }
 
@@ -1237,6 +1278,7 @@ export type ProviderHireBookingRowDto = {
   orderId: string;
   receiptNumber: string;
   paidAt: string;
+  currency: SupportedCurrency;
   serviceId: string;
   listingTitle: string;
   hireStart: string;
@@ -1244,7 +1286,7 @@ export type ProviderHireBookingRowDto = {
   pricingPeriod: PricingPeriod;
   hireBillableUnits: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   customer: ProviderHireBookingCustomerDto;
   primaryPhotoUrl?: string;
 };
@@ -1267,9 +1309,35 @@ function hireLineBelongsToProvider(
   return false;
 }
 
+type ProviderOrderCandidateRow = {
+  orderId: mongoose.Types.ObjectId;
+  receiptNumber: string;
+  paidAt: Date;
+  createdAt: Date;
+  buyerId: mongoose.Types.ObjectId;
+  orderCurrency: SupportedCurrency;
+};
+
+function orderCreatedAtFromDoc(doc: { createdAt?: Date; paidAt?: Date }): Date {
+  if (doc.createdAt instanceof Date && !Number.isNaN(doc.createdAt.getTime())) {
+    return doc.createdAt;
+  }
+  if (doc.paidAt instanceof Date && !Number.isNaN(doc.paidAt.getTime())) {
+    return doc.paidAt;
+  }
+  return new Date(0);
+}
+
+function sortProviderCandidateRowsByCreatedAtDesc<T extends { createdAt: Date }>(
+  rows: T[],
+): T[] {
+  rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return rows;
+}
+
 /**
  * Flattened hire bookings for the provider dashboard: one row per qualifying hire line.
- * Rows sorted by hireEnd descending (most recent end date first).
+ * Rows sorted by createdAt descending (most recent first).
  */
 export async function listProviderHireBookings(
   providerUserId: string,
@@ -1295,7 +1363,7 @@ export async function listProviderHireBookings(
   const orders = await Order.find({
     lines: { $elemMatch: elemMatch },
   })
-    .sort({ paidAt: -1 })
+    .sort({ createdAt: -1 })
     .limit(500)
     .lean();
 
@@ -1309,21 +1377,17 @@ export async function listProviderHireBookings(
     pricingPeriod?: string;
     hireBillableUnits?: number;
     quantity: number;
-    lineTotalNgn: number;
+    lineTotal: number;
   };
 
   const buyerIds = new Set<string>();
-  const candidateRows: {
-    orderId: mongoose.Types.ObjectId;
-    receiptNumber: string;
-    paidAt: Date;
-    buyerId: mongoose.Types.ObjectId;
-    line: OrderLineLean;
-  }[] = [];
+  const candidateRows: (ProviderOrderCandidateRow & { line: OrderLineLean })[] = [];
 
   for (const doc of orders) {
     const lines = Array.isArray(doc.lines) ? (doc.lines as OrderLineLean[]) : [];
     const buyerId = doc.userId as mongoose.Types.ObjectId;
+    const orderCurrency = parseSupportedCurrency(doc.currency, "NGN");
+    const createdAt = orderCreatedAtFromDoc(doc as { createdAt?: Date; paidAt?: Date });
     for (const line of lines) {
       if (line.lineKind !== "hire") {
         continue;
@@ -1341,7 +1405,9 @@ export async function listProviderHireBookings(
         orderId: doc._id as mongoose.Types.ObjectId,
         receiptNumber: doc.receiptNumber as string,
         paidAt: doc.paidAt as Date,
+        createdAt,
         buyerId,
+        orderCurrency,
         line,
       });
     }
@@ -1373,25 +1439,16 @@ export async function listProviderHireBookings(
     phone: "",
   });
 
-  const periodOrDaily = (raw: string | undefined): PricingPeriod => {
-    if (
-      raw === "hourly" ||
-      raw === "daily" ||
-      raw === "weekly" ||
-      raw === "monthly" ||
-      raw === "yearly"
-    ) {
-      return raw;
-    }
-    return "daily";
-  };
+  const periodOrDaily = (_raw: string | undefined): PricingPeriod => "daily";
 
   const uniqueServiceIds = [
     ...new Set(candidateRows.map((r) => r.line.serviceId.toString())),
   ].map((id) => new mongoose.Types.ObjectId(id));
   const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(uniqueServiceIds);
 
-  const rows: ProviderHireBookingRowDto[] = candidateRows.map((r) => {
+  const rows: ProviderHireBookingRowDto[] = sortProviderCandidateRowsByCreatedAtDesc(
+    candidateRows,
+  ).map((r) => {
     const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
     const bu =
       typeof r.line.hireBillableUnits === "number" && r.line.hireBillableUnits >= 1
@@ -1403,6 +1460,7 @@ export async function listProviderHireBookings(
       orderId: r.orderId.toString(),
       receiptNumber: r.receiptNumber,
       paidAt: r.paidAt.toISOString(),
+      currency: r.orderCurrency,
       serviceId: r.line.serviceId.toString(),
       listingTitle: r.line.title,
       hireStart: r.line.hireStart!.toISOString(),
@@ -1410,13 +1468,11 @@ export async function listProviderHireBookings(
       pricingPeriod: periodOrDaily(r.line.pricingPeriod),
       hireBillableUnits: bu,
       quantity: r.line.quantity,
-      lineTotalNgn: r.line.lineTotalNgn,
+      lineTotal: r.line.lineTotal,
       customer,
       ...(primaryPhotoUrl ? { primaryPhotoUrl } : {}),
     };
   });
-
-  rows.sort((a, b) => new Date(b.hireEnd).getTime() - new Date(a.hireEnd).getTime());
 
   return rows;
 }
@@ -1425,6 +1481,7 @@ export type ProviderPersonnelBookingRowDto = {
   orderId: string;
   receiptNumber: string;
   paidAt: string;
+  currency: SupportedCurrency;
   serviceId: string;
   listingTitle: string;
   bookStart: string;
@@ -1432,11 +1489,15 @@ export type ProviderPersonnelBookingRowDto = {
   pricingPeriod: PricingPeriod;
   bookBillableUnits: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   customer: ProviderHireBookingCustomerDto;
   primaryPhotoUrl?: string;
 };
 
+/**
+ * Flattened personnel (book) bookings for the provider dashboard: one row per qualifying book line.
+ * Rows sorted by createdAt descending (most recent first).
+ */
 export async function listProviderPersonnelBookings(
   providerUserId: string,
 ): Promise<ProviderPersonnelBookingRowDto[]> {
@@ -1461,7 +1522,7 @@ export async function listProviderPersonnelBookings(
   const orders = await Order.find({
     lines: { $elemMatch: elemMatch },
   })
-    .sort({ paidAt: -1 })
+    .sort({ createdAt: -1 })
     .limit(500)
     .lean();
 
@@ -1475,21 +1536,17 @@ export async function listProviderPersonnelBookings(
     pricingPeriod?: string;
     bookBillableUnits?: number;
     quantity: number;
-    lineTotalNgn: number;
+    lineTotal: number;
   };
 
   const buyerIds = new Set<string>();
-  const candidateRows: {
-    orderId: mongoose.Types.ObjectId;
-    receiptNumber: string;
-    paidAt: Date;
-    buyerId: mongoose.Types.ObjectId;
-    line: OrderLineLean;
-  }[] = [];
+  const candidateRows: (ProviderOrderCandidateRow & { line: OrderLineLean })[] = [];
 
   for (const doc of orders) {
     const lines = Array.isArray(doc.lines) ? (doc.lines as OrderLineLean[]) : [];
     const buyerId = doc.userId as mongoose.Types.ObjectId;
+    const orderCurrency = parseSupportedCurrency(doc.currency, "NGN");
+    const createdAt = orderCreatedAtFromDoc(doc as { createdAt?: Date; paidAt?: Date });
     for (const line of lines) {
       if (line.lineKind !== "book") {
         continue;
@@ -1507,7 +1564,9 @@ export async function listProviderPersonnelBookings(
         orderId: doc._id as mongoose.Types.ObjectId,
         receiptNumber: doc.receiptNumber as string,
         paidAt: doc.paidAt as Date,
+        createdAt,
         buyerId,
+        orderCurrency,
         line,
       });
     }
@@ -1539,25 +1598,34 @@ export async function listProviderPersonnelBookings(
     phone: "",
   });
 
-  const periodOrDaily = (raw: string | undefined): PricingPeriod => {
-    if (
-      raw === "hourly" ||
-      raw === "daily" ||
-      raw === "weekly" ||
-      raw === "monthly" ||
-      raw === "yearly"
-    ) {
-      return raw;
-    }
-    return "daily";
-  };
+  const periodOrDaily = (_raw: string | undefined): PricingPeriod => "daily";
 
   const uniqueServiceIds = [
     ...new Set(candidateRows.map((r) => r.line.serviceId.toString())),
   ].map((id) => new mongoose.Types.ObjectId(id));
   const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(uniqueServiceIds);
 
-  const rows: ProviderPersonnelBookingRowDto[] = candidateRows.map((r) => {
+  const scheduleByServiceId = new Map<string, HourlyBookingSchedule>();
+  if (uniqueServiceIds.length > 0) {
+    const serviceScheduleDocs = await Service.find({ _id: { $in: uniqueServiceIds } })
+      .select("bookingWindow hourlyBookingSchedule")
+      .lean();
+    for (const doc of serviceScheduleDocs) {
+      const serviceId = (doc._id as mongoose.Types.ObjectId).toString();
+      const bookingWindow = parseBookingWindowFromDoc(doc.bookingWindow);
+      if (!bookingWindow) {
+        continue;
+      }
+      const schedule =
+        resolveHourlyBookingSchedule(doc.hourlyBookingSchedule, doc.bookingWindow) ??
+        ({ default: bookingWindow, overrides: [] } satisfies HourlyBookingSchedule);
+      scheduleByServiceId.set(serviceId, schedule);
+    }
+  }
+
+  const rows: ProviderPersonnelBookingRowDto[] = sortProviderCandidateRowsByCreatedAtDesc(
+    candidateRows,
+  ).map((r) => {
     const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
     const bu =
       typeof r.line.bookBillableUnits === "number" && r.line.bookBillableUnits >= 1
@@ -1565,24 +1633,31 @@ export async function listProviderPersonnelBookings(
         : 1;
     const urls = photoUrlsByServiceId.get(r.line.serviceId.toString());
     const primaryPhotoUrl = urls?.[0];
+    const storedStart = r.line.bookStart!;
+    const storedEnd = r.line.bookEnd!;
+    const schedule = scheduleByServiceId.get(r.line.serviceId.toString());
+    const displayRange = schedule
+      ? resolveProviderDisplayBookRange(storedStart, storedEnd, schedule)
+      : null;
+    const bookStart = displayRange?.start ?? storedStart;
+    const bookEnd = displayRange?.end ?? storedEnd;
     return {
       orderId: r.orderId.toString(),
       receiptNumber: r.receiptNumber,
       paidAt: r.paidAt.toISOString(),
+      currency: r.orderCurrency,
       serviceId: r.line.serviceId.toString(),
       listingTitle: r.line.title,
-      bookStart: r.line.bookStart!.toISOString(),
-      bookEnd: r.line.bookEnd!.toISOString(),
+      bookStart: bookStart.toISOString(),
+      bookEnd: bookEnd.toISOString(),
       pricingPeriod: periodOrDaily(r.line.pricingPeriod),
       bookBillableUnits: bu,
       quantity: r.line.quantity,
-      lineTotalNgn: r.line.lineTotalNgn,
+      lineTotal: r.line.lineTotal,
       customer,
       ...(primaryPhotoUrl ? { primaryPhotoUrl } : {}),
     };
   });
-
-  rows.sort((a, b) => new Date(b.bookEnd).getTime() - new Date(a.bookEnd).getTime());
 
   return rows;
 }
@@ -1623,18 +1698,19 @@ export type ProviderSaleRowDto = {
   orderId: string;
   receiptNumber: string;
   paidAt: string;
+  currency: SupportedCurrency;
   serviceId: string;
   listingTitle: string;
   quantity: number;
-  unitPriceNgn: number;
-  lineTotalNgn: number;
+  unitPrice: number;
+  lineTotal: number;
   customer: ProviderHireBookingCustomerDto;
   primaryPhotoUrl?: string;
 };
 
 /**
  * Flattened sale orders for the provider dashboard: one row per qualifying sale line.
- * Rows sorted by paidAt descending (most recent first).
+ * Rows sorted by createdAt descending (most recent first).
  */
 export async function listProviderSales(
   providerUserId: string,
@@ -1659,7 +1735,7 @@ export async function listProviderSales(
   const orders = await Order.find({
     lines: { $elemMatch: elemMatch },
   })
-    .sort({ paidAt: -1 })
+    .sort({ createdAt: -1 })
     .limit(500)
     .lean();
 
@@ -1668,9 +1744,9 @@ export async function listProviderSales(
     sellerUserId?: mongoose.Types.ObjectId;
     serviceId: mongoose.Types.ObjectId;
     title: string;
-    unitPriceNgn?: number;
+    unitPrice?: number;
     quantity: number;
-    lineTotalNgn: number;
+    lineTotal: number;
     hireStart?: Date;
     hireEnd?: Date;
     hireBillableUnits?: number;
@@ -1680,17 +1756,13 @@ export async function listProviderSales(
   };
 
   const buyerIds = new Set<string>();
-  const candidateRows: {
-    orderId: mongoose.Types.ObjectId;
-    receiptNumber: string;
-    paidAt: Date;
-    buyerId: mongoose.Types.ObjectId;
-    line: OrderLineLean;
-  }[] = [];
+  const candidateRows: (ProviderOrderCandidateRow & { line: OrderLineLean })[] = [];
 
   for (const doc of orders) {
     const lines = Array.isArray(doc.lines) ? (doc.lines as OrderLineLean[]) : [];
     const buyerId = doc.userId as mongoose.Types.ObjectId;
+    const orderCurrency = parseSupportedCurrency(doc.currency, "NGN");
+    const createdAt = orderCreatedAtFromDoc(doc as { createdAt?: Date; paidAt?: Date });
     for (const line of lines) {
       if (!isSaleOrderLine(line)) {
         continue;
@@ -1703,7 +1775,9 @@ export async function listProviderSales(
         orderId: doc._id as mongoose.Types.ObjectId,
         receiptNumber: doc.receiptNumber as string,
         paidAt: doc.paidAt as Date,
+        createdAt,
         buyerId,
+        orderCurrency,
         line,
       });
     }
@@ -1740,31 +1814,32 @@ export async function listProviderSales(
   ].map((id) => new mongoose.Types.ObjectId(id));
   const photoUrlsByServiceId = await loadPhotoUrlsByServiceIds(uniqueServiceIds);
 
-  const rows: ProviderSaleRowDto[] = candidateRows.map((r) => {
+  const rows: ProviderSaleRowDto[] = sortProviderCandidateRowsByCreatedAtDesc(candidateRows).map(
+    (r) => {
     const customer = buyerById.get(r.buyerId.toString()) ?? defaultCustomer(r.buyerId.toString());
     const unitPrice =
-      typeof r.line.unitPriceNgn === "number" && r.line.unitPriceNgn >= 0
-        ? r.line.unitPriceNgn
+      typeof r.line.unitPrice === "number" && r.line.unitPrice >= 0
+        ? r.line.unitPrice
         : r.line.quantity > 0
-          ? Math.round(r.line.lineTotalNgn / r.line.quantity)
-          : r.line.lineTotalNgn;
+          ? Math.round(r.line.lineTotal / r.line.quantity)
+          : r.line.lineTotal;
     const urls = photoUrlsByServiceId.get(r.line.serviceId.toString());
     const primaryPhotoUrl = urls?.[0];
     return {
       orderId: r.orderId.toString(),
       receiptNumber: r.receiptNumber,
       paidAt: r.paidAt.toISOString(),
+      currency: r.orderCurrency,
       serviceId: r.line.serviceId.toString(),
       listingTitle: r.line.title,
       quantity: r.line.quantity,
-      unitPriceNgn: unitPrice,
-      lineTotalNgn: r.line.lineTotalNgn,
+      unitPrice: unitPrice,
+      lineTotal: r.line.lineTotal,
       customer,
       ...(primaryPhotoUrl ? { primaryPhotoUrl } : {}),
     };
-  });
-
-  rows.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
+  },
+  );
 
   return rows;
 }

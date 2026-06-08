@@ -3,8 +3,8 @@
  * /api/wallet/me:
  *   get:
  *     tags: [Wallet]
- *     summary: Get my wallet (provider)
- *     description: Returns balanceNgn and currency for the authenticated service provider.
+ *     summary: Get my wallets (provider)
+ *     description: Returns NGN and GHS wallet balances for the authenticated service provider.
  *     security:
  *       - cookieAuth: []
  *     responses:

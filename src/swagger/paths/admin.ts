@@ -43,8 +43,9 @@
  *     tags: [Admin]
  *     summary: Platform revenue aggregated by month
  *     description: |
- *       Admin only. Returns platform-wide order revenue (`subtotalNgn`) grouped by
- *       `paidAt` month for a calendar year (UTC). All paid orders count; no provider filter.
+ *       Admin only. Returns platform-wide order revenue grouped by `paidAt` month
+ *       for a calendar year (UTC), filtered by currency. All paid orders in that
+ *       currency count; no provider filter and no FX conversion.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -56,9 +57,16 @@
  *           minimum: 2000
  *           maximum: 2100
  *         example: 2026
+ *       - in: query
+ *         name: currency
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [NGN, GHS]
+ *         example: NGN
  *     responses:
  *       200:
- *         description: Monthly revenue breakdown (12 buckets, yearMonth + label + totalNgn)
+ *         description: Monthly revenue breakdown (12 buckets, yearMonth + label + total)
  *         content:
  *           application/json:
  *             schema:

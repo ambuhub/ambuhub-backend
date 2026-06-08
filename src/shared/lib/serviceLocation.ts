@@ -115,6 +115,9 @@ export function normalizeServiceLocation(
   if (!countryCode) {
     throw new Error("countryCode must be a valid ISO 3166-1 alpha-2 code");
   }
+  if (countryCode !== "NG" && countryCode !== "GH") {
+    throw new Error("countryCode must be NG (Nigeria) or GH (Ghana)");
+  }
 
   const stateProvince = validateStateForCountry(countryCode, stateRaw);
 

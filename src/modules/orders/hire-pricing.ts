@@ -1,10 +1,18 @@
 import type { PricingPeriod } from "../services/services.service";
 import {
+  countBillableDaysInScheduleRange,
+  loadBusyBookIntervals,
+  resolveBillableBookRangeInstants,
+} from "../../shared/lib/booking-availability";
+import {
+  resolveHourlyBookingSchedule,
+  type HourlyBookingSchedule,
+} from "../../shared/lib/hourly-booking-schedule";
+import {
   lagosWallClockToDate,
   type HireReturnWindow,
 } from "../../shared/lib/hireReturnWindow";
 
-const HOUR_MS = 3600000;
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function inclusiveUtcCalendarDays(start: Date, end: Date): number {
@@ -14,10 +22,10 @@ function inclusiveUtcCalendarDays(start: Date, end: Date): number {
 }
 
 /**
- * Parse hire window from request strings. Hourly uses full instants; other periods use UTC calendar dates (YYYY-MM-DD preferred).
+ * Parse hire window from request strings as UTC calendar dates (YYYY-MM-DD preferred).
  */
 export function parseHireInstantRange(
-  pricingPeriod: PricingPeriod,
+  _pricingPeriod: PricingPeriod | string,
   hireStartRaw: string,
   hireEndRaw: string,
 ): { start: Date; end: Date } {
@@ -25,15 +33,6 @@ export function parseHireInstantRange(
   const b = (hireEndRaw ?? "").trim();
   if (!a || !b) {
     throw new Error("hireStart and hireEnd are required");
-  }
-
-  if (pricingPeriod === "hourly") {
-    const start = new Date(a);
-    const end = new Date(b);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      throw new Error("hireStart and hireEnd must be valid ISO date-times");
-    }
-    return { start, end };
   }
 
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -99,55 +98,77 @@ export function parseBookCalendarRange(
 }
 
 export function computeHireBillableUnits(
-  pricingPeriod: PricingPeriod,
+  _pricingPeriod: PricingPeriod | string,
   start: Date,
   end: Date,
 ): number {
   if (end.getTime() <= start.getTime()) {
     throw new Error("Hire end must be after hire start");
   }
+  return Math.max(1, inclusiveUtcCalendarDays(start, end));
+}
 
-  if (pricingPeriod === "hourly") {
-    const ms = end.getTime() - start.getTime();
-    return Math.max(1, Math.ceil(ms / HOUR_MS));
+export type BookCheckoutRange = {
+  billableUnits: number;
+  effectiveStart: Date;
+  effectiveEnd: Date;
+};
+
+/** Resolve billable units and provider-facing book instants (first/last billable days in range). */
+export async function resolveBookCheckoutRange(
+  serviceId: string,
+  range: { start: Date; end: Date },
+  bookingWindow: HireReturnWindow,
+  hourlyScheduleRaw: unknown,
+  gapMinutes: number,
+): Promise<BookCheckoutRange | null> {
+  const from = new Date(range.start.getTime() - 86400000);
+  const to = new Date(range.end.getTime() + 86400000);
+  const busy = await loadBusyBookIntervals(serviceId, from, to);
+  const schedule =
+    resolveHourlyBookingSchedule(hourlyScheduleRaw, bookingWindow) ??
+    ({ default: bookingWindow, overrides: [] } satisfies HourlyBookingSchedule);
+  const billableUnits = countBillableDaysInScheduleRange(
+    range.start,
+    range.end,
+    schedule,
+    busy,
+    gapMinutes,
+  );
+  if (billableUnits < 1) {
+    return null;
   }
-
-  const inclusiveDays = inclusiveUtcCalendarDays(start, end);
-
-  if (pricingPeriod === "daily") {
-    return Math.max(1, inclusiveDays);
+  const effective = resolveBillableBookRangeInstants(
+    range.start,
+    range.end,
+    schedule,
+    busy,
+    gapMinutes,
+  );
+  if (!effective) {
+    return null;
   }
+  return {
+    billableUnits,
+    effectiveStart: effective.start,
+    effectiveEnd: effective.end,
+  };
+}
 
-  if (pricingPeriod === "weekly") {
-    return Math.max(1, Math.ceil(inclusiveDays / 7));
-  }
-
-  if (pricingPeriod === "monthly") {
-    const sy = start.getUTCFullYear();
-    const sm = start.getUTCMonth();
-    const sd = start.getUTCDate();
-    const ey = end.getUTCFullYear();
-    const em = end.getUTCMonth();
-    const ed = end.getUTCDate();
-    let months = (ey - sy) * 12 + (em - sm);
-    if (ed < sd) {
-      months -= 1;
-    }
-    return Math.max(1, months + 1);
-  }
-
-  if (pricingPeriod === "yearly") {
-    const sy = start.getUTCFullYear();
-    const ey = end.getUTCFullYear();
-    let years = ey - sy;
-    if (
-      end.getUTCMonth() < start.getUTCMonth() ||
-      (end.getUTCMonth() === start.getUTCMonth() && end.getUTCDate() < start.getUTCDate())
-    ) {
-      years -= 1;
-    }
-    return Math.max(1, years + 1);
-  }
-
-  throw new Error(`Unsupported pricing period: ${String(pricingPeriod)}`);
+/** Billable daily book units: only days with free schedule time in the selected range. */
+export async function computeBookBillableUnits(
+  serviceId: string,
+  range: { start: Date; end: Date },
+  bookingWindow: HireReturnWindow,
+  hourlyScheduleRaw: unknown,
+  gapMinutes: number,
+): Promise<number> {
+  const resolved = await resolveBookCheckoutRange(
+    serviceId,
+    range,
+    bookingWindow,
+    hourlyScheduleRaw,
+    gapMinutes,
+  );
+  return resolved?.billableUnits ?? 0;
 }

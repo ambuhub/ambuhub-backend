@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { parseSupportedCurrency } from "../../shared/currency/types";
 import { requireServiceProvider } from "../../shared/middlewares/authenticate";
 import { CartHttpError } from "../cart/cart.service";
 import {
@@ -166,8 +167,11 @@ export async function getProviderSalesByMonthHandler(
         year = y;
       }
     }
-    const months = await getProviderSalesByMonth(req.auth.userId, year);
-    res.status(200).json({ year, months });
+    const currency = parseSupportedCurrency(
+      typeof req.query.currency === "string" ? req.query.currency : undefined,
+    );
+    const months = await getProviderSalesByMonth(req.auth.userId, year, currency);
+    res.status(200).json({ year, currency, months });
   } catch (err: unknown) {
     if (err instanceof OrdersHttpError) {
       res.status(err.statusCode).json({ message: err.message });

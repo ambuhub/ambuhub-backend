@@ -513,7 +513,7 @@
  *           items:
  *             type: string
  *             format: uri
- *         lineTotalNgn:
+ *         lineTotal:
  *           type: number
  *           nullable: true
  *       example:
@@ -579,7 +579,7 @@
  *           type: number
  *         quantity:
  *           type: integer
- *         lineTotalNgn:
+ *         lineTotal:
  *           type: number
  *         categoryName:
  *           type: string
@@ -794,7 +794,7 @@
  *           type: number
  *         quantity:
  *           type: integer
- *         lineTotalNgn:
+ *         lineTotal:
  *           type: number
  *         categoryName:
  *           type: string
@@ -954,32 +954,36 @@
  *         label:
  *           type: string
  *           description: Short month label
- *         totalNgn:
+ *         total:
  *           type: number
  *       example:
  *         yearMonth: "2026-05"
  *         label: "May"
- *         totalNgn: 250000
+ *         total: 250000
  *
  *     ProviderSalesByMonthResponse:
  *       type: object
- *       required: [year, months]
+ *       required: [year, currency, months]
  *       properties:
  *         year:
  *           type: integer
+ *         currency:
+ *           type: string
+ *           enum: [NGN, GHS]
  *         months:
  *           type: array
  *           items:
  *             $ref: '#/components/schemas/ProviderSalesMonthBucket'
  *       example:
  *         year: 2026
+ *         currency: "NGN"
  *         months:
  *           - yearMonth: "2026-01"
  *             label: "Jan"
- *             totalNgn: 0
+ *             total: 0
  *           - yearMonth: "2026-05"
  *             label: "May"
- *             totalNgn: 250000
+ *             total: 250000
  *
  *     ProviderHireBookingCustomer:
  *       type: object
@@ -1011,6 +1015,9 @@
  *         paidAt:
  *           type: string
  *           format: date-time
+ *         currency:
+ *           type: string
+ *           enum: [NGN, GHS]
  *         serviceId:
  *           type: string
  *         listingTitle:
@@ -1027,7 +1034,7 @@
  *           type: number
  *         quantity:
  *           type: integer
- *         lineTotalNgn:
+ *         lineTotal:
  *           type: number
  *         customer:
  *           $ref: '#/components/schemas/ProviderHireBookingCustomer'
@@ -1091,6 +1098,9 @@
  *         paidAt:
  *           type: string
  *           format: date-time
+ *         currency:
+ *           type: string
+ *           enum: [NGN, GHS]
  *         serviceId:
  *           type: string
  *         listingTitle:
@@ -1099,7 +1109,7 @@
  *           type: integer
  *         unitPriceNgn:
  *           type: number
- *         lineTotalNgn:
+ *         lineTotal:
  *           type: number
  *         customer:
  *           $ref: '#/components/schemas/ProviderHireBookingCustomer'
@@ -1147,27 +1157,33 @@
  *               email: "jane@example.com"
  *               phone: "+2348000000000"
  *
- *     Wallet:
+ *     WalletBalance:
  *       type: object
+ *       required: [currency, balance]
  *       properties:
- *         balanceNgn:
- *           type: number
  *         currency:
  *           type: string
+ *           enum: [NGN, GHS]
+ *         balance:
+ *           type: number
  *       example:
- *         balanceNgn: 125000
  *         currency: "NGN"
+ *         balance: 30000
  *
  *     WalletResponse:
  *       type: object
- *       required: [wallet]
+ *       required: [wallets]
  *       properties:
- *         wallet:
- *           $ref: '#/components/schemas/Wallet'
+ *         wallets:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/WalletBalance'
  *       example:
- *         wallet:
- *           balanceNgn: 125000
- *           currency: "NGN"
+ *         wallets:
+ *           - currency: "NGN"
+ *             balance: 30000
+ *           - currency: "GHS"
+ *             balance: 3000
  *
  *     Review:
  *       type: object
@@ -1432,7 +1448,7 @@
  *         label:
  *           type: string
  *           description: Short month label
- *         totalNgn:
+ *         total:
  *           type: number
  *         orderCount:
  *           type: integer
@@ -1440,29 +1456,33 @@
  *       example:
  *         yearMonth: "2026-05"
  *         label: "May"
- *         totalNgn: 450000
+ *         total: 450000
  *         orderCount: 18
  *
  *     AdminTransactionsByMonthResponse:
  *       type: object
- *       required: [year, months]
+ *       required: [year, currency, months]
  *       properties:
  *         year:
  *           type: integer
+ *         currency:
+ *           type: string
+ *           enum: [NGN, GHS]
  *         months:
  *           type: array
  *           items:
  *             $ref: '#/components/schemas/AdminTransactionsMonthBucket'
  *       example:
  *         year: 2026
+ *         currency: "NGN"
  *         months:
  *           - yearMonth: "2026-01"
  *             label: "Jan"
- *             totalNgn: 0
+ *             total: 0
  *             orderCount: 0
  *           - yearMonth: "2026-05"
  *             label: "May"
- *             totalNgn: 450000
+ *             total: 450000
  *             orderCount: 18
  *
  *     AdminUserListItem:
@@ -1703,7 +1723,7 @@
  *           type: number
  *         quantity:
  *           type: integer
- *         lineTotalNgn:
+ *         lineTotal:
  *           type: number
  *         categoryName:
  *           type: string

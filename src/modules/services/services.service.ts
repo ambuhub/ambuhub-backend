@@ -50,23 +50,14 @@ import {
   resolveStateProvinceName,
   type ServiceLocationInput,
 } from "../../shared/lib/serviceLocation";
+import { parseSupportedCurrency, type SupportedCurrency } from "../../shared/currency/types";
+import { currencyForCountry, type MarketplaceCountryCode } from "../../shared/currency/countryCurrency";
 
 export type ListingType = "sale" | "hire" | "book";
 
-export type PricingPeriod =
-  | "hourly"
-  | "daily"
-  | "weekly"
-  | "monthly"
-  | "yearly";
+export type PricingPeriod = "daily";
 
-const PRICING_PERIODS = new Set<PricingPeriod>([
-  "hourly",
-  "daily",
-  "weekly",
-  "monthly",
-  "yearly",
-]);
+const PRICING_PERIODS = new Set<PricingPeriod>(["daily"]);
 
 const PERSONNEL_CATEGORY_SLUG = "personnel";
 const AMBULANCE_SERVICING_CATEGORY_SLUG = "ambulance-servicing";
@@ -95,6 +86,7 @@ export interface MyServiceDto {
   listingType: ListingType | null;
   stock: number | null;
   price: number | null;
+  currency: SupportedCurrency;
   pricingPeriod: PricingPeriod | null;
   isAvailable: boolean;
   departmentSlug: string;
@@ -146,6 +138,7 @@ type LeanPopulatedService = {
   listingType?: ListingType | null;
   stock?: number | null;
   price?: number | null;
+  currency?: string | null;
   pricingPeriod?: PricingPeriod | null;
   isAvailable?: boolean | null;
   departmentSlug: string;
@@ -184,11 +177,17 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     }
   }
 
+  const listingType = doc.listingType ?? null;
   const rawPeriod = doc.pricingPeriod;
-  const pricingPeriod: PricingPeriod | null =
+  let pricingPeriod: PricingPeriod | null =
     typeof rawPeriod === "string" && PRICING_PERIODS.has(rawPeriod as PricingPeriod)
       ? (rawPeriod as PricingPeriod)
       : null;
+  if (listingType === "hire" || listingType === "book") {
+    pricingPeriod = "daily";
+  }
+
+  const currency = parseSupportedCurrency(doc.currency, "NGN");
 
   return {
     id: doc._id.toString(),
@@ -197,6 +196,7 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
     listingType: doc.listingType ?? null,
     stock: normalizeStock(doc.stock),
     price: normalizePrice(doc.price),
+    currency,
     pricingPeriod,
     isAvailable: doc.isAvailable !== false,
     departmentSlug: doc.departmentSlug,
@@ -266,8 +266,16 @@ export type MarketplaceServicesResult = {
   bannerUrl: string | null;
 };
 
+export type MarketplaceListOptions = {
+  countryCode: MarketplaceCountryCode;
+  sort?: "price_asc" | "price_desc" | "newest";
+  priceMin?: number;
+  priceMax?: number;
+};
+
 export async function listMarketplaceServices(
-  categorySlug?: string
+  categorySlug?: string,
+  options?: MarketplaceListOptions,
 ): Promise<MarketplaceServicesResult> {
   let query: Record<string, unknown> = {};
   let bannerUrl: string | null = null;
@@ -296,12 +304,48 @@ export async function listMarketplaceServices(
     query = { ...MARKETPLACE_AVAILABLE_FILTER };
   }
 
+  if (!options?.countryCode) {
+    throw new ServicesHttpError(400, "countryCode is required");
+  }
+
+  const countryFilter = { countryCode: options.countryCode };
+  if (query.$and) {
+    (query.$and as Record<string, unknown>[]).push(countryFilter);
+  } else {
+    query = { $and: [query, countryFilter] };
+  }
+
+  if (options.priceMin != null || options.priceMax != null) {
+    const priceRange: Record<string, number> = {};
+    if (options.priceMin != null && Number.isFinite(options.priceMin) && options.priceMin >= 0) {
+      priceRange.$gte = options.priceMin;
+    }
+    if (options.priceMax != null && Number.isFinite(options.priceMax) && options.priceMax >= 0) {
+      priceRange.$lte = options.priceMax;
+    }
+    if (Object.keys(priceRange).length > 0) {
+      const priceClause = { price: priceRange };
+      if (query.$and) {
+        (query.$and as Record<string, unknown>[]).push(priceClause);
+      } else {
+        query = { $and: [query, priceClause] };
+      }
+    }
+  }
+
+  let sort: Record<string, 1 | -1> = { createdAt: -1 };
+  if (options.sort === "price_asc") {
+    sort = { price: 1, createdAt: -1 };
+  } else if (options.sort === "price_desc") {
+    sort = { price: -1, createdAt: -1 };
+  }
+
   const rows = await Service.find(query)
     .populate<{ serviceCategoryId: PopulatedCategory | null }>(
       "serviceCategoryId",
       "name slug departments"
     )
-    .sort({ createdAt: -1 })
+    .sort(sort)
     .limit(MARKETPLACE_LISTING_CAP)
     .lean();
 
@@ -377,7 +421,7 @@ export type ServiceDetailWithOwnerDto = MarketplaceServiceDetailDto & {
 
 async function loadServiceDetailById(
   serviceId: string,
-  options?: { marketplaceOnly?: boolean },
+  options?: { marketplaceOnly?: boolean; countryCode?: MarketplaceCountryCode },
 ): Promise<ServiceDetailWithOwnerDto> {
   const trimmed = serviceId?.trim() ?? "";
   if (!trimmed || !mongoose.Types.ObjectId.isValid(trimmed)) {
@@ -405,6 +449,14 @@ async function loadServiceDetailById(
     throw new ServicesHttpError(404, "Service not found");
   }
 
+  if (
+    options?.countryCode &&
+    typeof doc.countryCode === "string" &&
+    doc.countryCode.toUpperCase() !== options.countryCode
+  ) {
+    throw new ServicesHttpError(404, "Service not found");
+  }
+
   const base = mapLeanServiceToDto(doc as LeanPopulatedService);
   const ownerId = doc.userId as mongoose.Types.ObjectId | undefined;
   const provider = ownerId
@@ -427,9 +479,11 @@ export async function getServiceDetailById(
 
 export async function getMarketplaceServiceById(
   serviceId: string,
+  countryCode?: MarketplaceCountryCode,
 ): Promise<MarketplaceServiceDetailDto> {
   const detail = await loadServiceDetailById(serviceId, {
     marketplaceOnly: true,
+    countryCode,
   });
   const { ownerUserId: _ownerUserId, ...marketplace } = detail;
   return marketplace;
@@ -437,6 +491,7 @@ export async function getMarketplaceServiceById(
 
 export async function listFavoriteServicesForUser(
   userId: string,
+  countryCode?: MarketplaceCountryCode,
 ): Promise<MarketplaceServiceDto[]> {
   const trimmedUserId = userId?.trim() ?? "";
   if (!trimmedUserId || !mongoose.Types.ObjectId.isValid(trimmedUserId)) {
@@ -453,6 +508,7 @@ export async function listFavoriteServicesForUser(
 
   const rows = await Service.find({
     _id: { $in: rawIds },
+    ...(countryCode ? { countryCode } : {}),
     $or: [
       { isAvailable: true },
       { isAvailable: { $exists: false } },
@@ -752,6 +808,13 @@ function normalizeAndValidateServiceInput(
     );
   }
 
+  if (effectiveListingType === "book" && normalizedPrice === null) {
+    throw new ServicesHttpError(
+      400,
+      "price is required when listingType is 'book'"
+    );
+  }
+
   if (
     effectiveListingType !== "sale" &&
     effectiveListingType !== "hire" &&
@@ -778,20 +841,28 @@ function normalizeAndValidateServiceInput(
     if (!PRICING_PERIODS.has(trimmed as PricingPeriod)) {
       throw new ServicesHttpError(
         400,
-        "pricingPeriod must be one of: hourly, daily, weekly, monthly, yearly"
+        "pricingPeriod must be daily for hire and book listings"
       );
     }
     return trimmed as PricingPeriod;
   })();
 
+  let resolvedPricingPeriod = normalizedPricingPeriod;
   if (effectiveListingType === "hire" || effectiveListingType === "book") {
-    if (normalizedPricingPeriod === null && effectiveListingType === "hire") {
-      throw new ServicesHttpError(
-        400,
-        "pricingPeriod is required when listingType is 'hire'"
-      );
+    if (resolvedPricingPeriod === null) {
+      if (effectiveListingType === "hire") {
+        throw new ServicesHttpError(
+          400,
+          "pricingPeriod is required when listingType is 'hire'"
+        );
+      }
+      if (effectiveListingType === "book" && normalizedPrice !== null) {
+        resolvedPricingPeriod = "daily";
+      }
+    } else if (resolvedPricingPeriod !== "daily") {
+      throw new ServicesHttpError(400, "pricingPeriod must be daily for hire and book listings");
     }
-  } else if (normalizedPricingPeriod !== null) {
+  } else if (resolvedPricingPeriod !== null) {
     throw new ServicesHttpError(
       400,
       "pricingPeriod must be null unless listingType is 'hire' or 'book'"
@@ -809,7 +880,7 @@ function normalizeAndValidateServiceInput(
     listingType: effectiveListingType,
     stock: normalizedStock,
     price: normalizedPrice,
-    pricingPeriod: normalizedPricingPeriod,
+    pricingPeriod: resolvedPricingPeriod,
     photoUrls: normalizedUrls,
   };
 }
@@ -868,6 +939,8 @@ export async function createService(
     );
   }
 
+  const listingCurrency = currencyForCountry(location.countryCode);
+
   const doc = await Service.create({
     title: normalized.title,
     description: normalized.description,
@@ -876,6 +949,7 @@ export async function createService(
     listingType: normalized.listingType,
     stock: normalized.stock,
     price: normalized.price,
+    currency: listingCurrency,
     pricingPeriod: normalized.pricingPeriod,
     departmentSlug: normalized.departmentSlug,
     photoUrls: normalized.photoUrls,
@@ -968,6 +1042,11 @@ export async function updateService(
     updatePayload.countryCode = location.countryCode;
     updatePayload.stateProvince = location.stateProvince;
     updatePayload.officeAddress = location.officeAddress;
+    updatePayload.currency = currencyForCountry(location.countryCode);
+  } else {
+    const existingCountry =
+      typeof service.countryCode === "string" ? service.countryCode : "NG";
+    updatePayload.currency = currencyForCountry(existingCountry);
   }
 
   const isHire = normalized.listingType === "hire";
@@ -1103,30 +1182,22 @@ export async function updateBookingSettings(
     throw new ServicesHttpError(400, "This category does not support booking");
   }
 
-  const updatePayload: Record<string, unknown> = {};
-
-  const effectivePeriod =
-    input.pricingPeriod !== undefined && input.pricingPeriod !== null && input.pricingPeriod !== ""
-      ? typeof input.pricingPeriod === "string"
-        ? input.pricingPeriod.trim()
-        : null
-      : (service.pricingPeriod as string | null | undefined);
+  const updatePayload: Record<string, unknown> = {
+    pricingPeriod: "daily",
+  };
 
   if (hasHourlyBookingScheduleInput(input)) {
-    if (effectivePeriod !== "hourly") {
-      throw new ServicesHttpError(
-        400,
-        "hourlyBookingSchedule applies only when pricing period is hourly",
-      );
-    }
     try {
       const schedule = normalizeHourlyBookingSchedule(input.hourlyBookingSchedule, {
         required: true,
       });
+      if (!schedule) {
+        throw new ServicesHttpError(400, "Invalid booking schedule overrides");
+      }
       updatePayload.hourlyBookingSchedule = schedule;
-      updatePayload.bookingWindow = schedule?.default ?? null;
+      updatePayload.bookingWindow = schedule.default;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Invalid hourly booking schedule";
+      const msg = err instanceof Error ? err.message : "Invalid booking schedule overrides";
       throw new ServicesHttpError(400, msg);
     }
   } else if (hasBookingWindowInput(input)) {
@@ -1137,11 +1208,17 @@ export async function updateBookingSettings(
       wrapBookingWindowError(err);
     }
     updatePayload.bookingWindow = bookingWindow;
-    if (effectivePeriod === "hourly" && bookingWindow) {
-      updatePayload.hourlyBookingSchedule = {
-        default: bookingWindow,
-        overrides: [],
-      };
+    const existing = parseHourlyBookingScheduleFromDoc(service.hourlyBookingSchedule);
+    updatePayload.hourlyBookingSchedule = {
+      default: bookingWindow!,
+      overrides: existing?.overrides ?? [],
+    };
+  }
+
+  if (input.pricingPeriod !== undefined && input.pricingPeriod !== null && input.pricingPeriod !== "") {
+    const trimmed = typeof input.pricingPeriod === "string" ? input.pricingPeriod.trim() : "";
+    if (trimmed && trimmed !== "daily") {
+      throw new ServicesHttpError(400, "pricingPeriod must be daily for book listings");
     }
   }
 
@@ -1163,20 +1240,21 @@ export async function updateBookingSettings(
     } else {
       throw new ServicesHttpError(400, "price must be a non-negative number or null");
     }
+    const countryCode =
+      typeof service.countryCode === "string" ? service.countryCode : "NG";
+    updatePayload.currency = currencyForCountry(countryCode);
   }
 
   if (input.pricingPeriod !== undefined) {
-    if (input.pricingPeriod === null || input.pricingPeriod === "") {
-      updatePayload.pricingPeriod = null;
-    } else if (
+    if (
+      input.pricingPeriod !== null &&
+      input.pricingPeriod !== "" &&
       typeof input.pricingPeriod === "string" &&
-      PRICING_PERIODS.has(input.pricingPeriod.trim() as PricingPeriod)
+      input.pricingPeriod.trim() !== "daily"
     ) {
-      updatePayload.pricingPeriod = input.pricingPeriod.trim();
-    } else {
       throw new ServicesHttpError(
         400,
-        "pricingPeriod must be one of: hourly, daily, weekly, monthly, yearly",
+        "pricingPeriod must be daily for book listings",
       );
     }
   }
@@ -1279,30 +1357,26 @@ export async function getBookingAvailability(
       : 0;
   const gapHours = gapMinutesToHours(gapMinutes);
 
-  const rawPeriod = doc.pricingPeriod;
-  const pricingPeriod: PricingPeriod | null =
-    typeof rawPeriod === "string" && PRICING_PERIODS.has(rawPeriod as PricingPeriod)
-      ? (rawPeriod as PricingPeriod)
-      : null;
-
+  const pricingPeriod: PricingPeriod = "daily";
   const price = typeof doc.price === "number" ? doc.price : null;
 
-  if (pricingPeriod === "hourly") {
-    if (!hasValidHourlySchedule(hourlySchedule)) {
-      return {
-        bookingWindow,
-        hourlyBookingSchedule: hourlySchedule,
-        bookingGapMinutes: gapMinutes,
-        bookingGapHours: gapHours,
-        price,
-        pricingPeriod,
-        busyIntervals: [],
-        freeRanges: [],
-        days: [],
-      };
-    }
+  if (!bookingWindow && !hasValidHourlySchedule(hourlySchedule)) {
+    return {
+      bookingWindow: null,
+      hourlyBookingSchedule: hourlySchedule,
+      bookingGapMinutes: gapMinutes,
+      bookingGapHours: gapHours,
+      price,
+      pricingPeriod,
+      busyIntervals: [],
+      freeRanges: [],
+      days: [],
+    };
+  }
 
-    const busy = await loadBusyBookIntervals(trimmed, from, to);
+  const busy = await loadBusyBookIntervals(trimmed, from, to);
+
+  if (hasValidHourlySchedule(hourlySchedule)) {
     const segments = buildHourlySegments(hourlySchedule, from, to);
     const free = computeFreeRanges(segments, busy, gapMinutes);
     const freeIso = free.map(intervalToIso);
@@ -1320,7 +1394,7 @@ export async function getBookingAvailability(
     });
 
     return {
-      bookingWindow: hourlySchedule.default,
+      bookingWindow,
       hourlyBookingSchedule: hourlySchedule,
       bookingGapMinutes: gapMinutes,
       bookingGapHours: gapHours,
@@ -1332,22 +1406,25 @@ export async function getBookingAvailability(
     };
   }
 
-  if (!bookingWindow) {
-    return {
-      bookingWindow: null,
-      hourlyBookingSchedule: hourlySchedule,
-      bookingGapMinutes: gapMinutes,
-      bookingGapHours: gapHours,
-      price,
-      pricingPeriod,
-      busyIntervals: [],
-      freeRanges: [],
-    };
-  }
-
-  const busy = await loadBusyBookIntervals(trimmed, from, to);
-  const weekly = buildWeeklySegments(bookingWindow, from, to);
+  const weekly = buildWeeklySegments(bookingWindow!, from, to);
   const free = computeFreeRanges(weekly, busy, gapMinutes);
+  const freeIso = free.map(intervalToIso);
+  const syntheticSchedule: HourlyBookingSchedule = {
+    default: bookingWindow!,
+    overrides: [],
+  };
+
+  const days: HourlyBookingDayDto[] = enumerateLagosDates(from, to).map((date) => {
+    const { kind, windows } = getScheduledWindowsForDate(syntheticSchedule, date);
+    const daySegments = weekly.filter((s) => lagosDateString(s.start) === date);
+    const dayFree = computeFreeRanges(daySegments, busy, gapMinutes);
+    return {
+      date,
+      kind,
+      windows,
+      freeSlots: dayFree.map(intervalToIso),
+    };
+  });
 
   return {
     bookingWindow,
@@ -1357,6 +1434,7 @@ export async function getBookingAvailability(
     price,
     pricingPeriod,
     busyIntervals: busy.map(intervalToIso),
-    freeRanges: free.map(intervalToIso),
+    freeRanges: freeIso,
+    days,
   };
 }

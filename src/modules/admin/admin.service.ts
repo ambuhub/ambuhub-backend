@@ -4,6 +4,9 @@ import { Service } from "../../models/service.model";
 import { ServiceProvider } from "../../models/serviceProvider.model";
 import { User } from "../../models/user.model";
 import {
+  type SupportedCurrency,
+} from "../../shared/currency/types";
+import {
   getReceiptByOrderId,
   OrdersHttpError,
   type ReceiptDetailDto,
@@ -58,7 +61,7 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
 export type AdminTransactionsMonthBucket = {
   yearMonth: string;
   label: string;
-  totalNgn: number;
+  total: number;
   orderCount: number;
 };
 
@@ -84,10 +87,12 @@ function shortMonthLabelUtc(yearMonth: string): string {
 }
 
 /**
- * Platform-wide order revenue by `paidAt` month (UTC) for a calendar year.
+ * Platform-wide order revenue by `paidAt` month (UTC) for a calendar year,
+ * filtered by order currency (no FX mixing).
  */
 export async function getAdminTransactionsByMonth(
   year: number,
+  currency: SupportedCurrency,
 ): Promise<AdminTransactionsMonthBucket[]> {
   const buckets = calendarYearMonthsUtc(year);
 
@@ -95,7 +100,7 @@ export async function getAdminTransactionsByMonth(
     return buckets.map((ym) => ({
       yearMonth: ym,
       label: shortMonthLabelUtc(ym),
-      totalNgn: 0,
+      total: 0,
       orderCount: 0,
     }));
   }
@@ -105,7 +110,7 @@ export async function getAdminTransactionsByMonth(
 
   const agg = await Order.aggregate<{
     _id: string;
-    totalNgn: number;
+    total: number;
     orderCount: number;
   }>([
     {
@@ -114,11 +119,17 @@ export async function getAdminTransactionsByMonth(
       },
     },
     {
+      $addFields: {
+        resolvedCurrency: { $ifNull: ["$currency", "NGN"] },
+      },
+    },
+    { $match: { resolvedCurrency: currency } },
+    {
       $group: {
         _id: {
           $dateToString: { format: "%Y-%m", date: "$paidAt", timezone: "UTC" },
         },
-        totalNgn: { $sum: "$subtotalNgn" },
+        total: { $sum: { $ifNull: ["$subtotal", "$subtotalNgn"] } },
         orderCount: { $sum: 1 },
       },
     },
@@ -129,7 +140,7 @@ export async function getAdminTransactionsByMonth(
   for (const row of agg) {
     revenueByMonth.set(
       row._id,
-      typeof row.totalNgn === "number" ? row.totalNgn : 0,
+      typeof row.total === "number" ? row.total : 0,
     );
     countByMonth.set(
       row._id,
@@ -140,7 +151,7 @@ export async function getAdminTransactionsByMonth(
   return buckets.map((ym) => ({
     yearMonth: ym,
     label: shortMonthLabelUtc(ym),
-    totalNgn: revenueByMonth.get(ym) ?? 0,
+    total: revenueByMonth.get(ym) ?? 0,
     orderCount: countByMonth.get(ym) ?? 0,
   }));
 }
@@ -168,7 +179,7 @@ export type AdminUserProviderProfile = {
 export type AdminUserTransaction = {
   id: string;
   receiptNumber: string;
-  subtotalNgn: number;
+  subtotal: number;
   currency: string;
   paidAt: string;
   createdAt: string;
@@ -302,7 +313,7 @@ function mapOrderToTransaction(
   doc: {
     _id: mongoose.Types.ObjectId;
     receiptNumber: string;
-    subtotalNgn: number;
+    subtotal: number;
     currency: string;
     paidAt: Date;
     createdAt: Date;
@@ -313,7 +324,7 @@ function mapOrderToTransaction(
   return {
     id: doc._id.toString(),
     receiptNumber: doc.receiptNumber,
-    subtotalNgn: doc.subtotalNgn,
+    subtotal: doc.subtotal,
     currency: doc.currency,
     paidAt: doc.paidAt.toISOString(),
     createdAt: doc.createdAt.toISOString(),
@@ -584,7 +595,7 @@ export type AdminOrderBuyerSummary = {
 export type AdminOrderListItem = {
   id: string;
   receiptNumber: string;
-  subtotalNgn: number;
+  subtotal: number;
   currency: string;
   paidAt: string;
   createdAt: string;
@@ -623,9 +634,9 @@ export type AdminOrderLineDetail = {
   sellerName: string | null;
   lineKind: AdminOrderLineKind | null;
   title: string;
-  unitPriceNgn: number;
+  unitPrice: number;
   quantity: number;
-  lineTotalNgn: number;
+  lineTotal: number;
   categoryName: string;
   categorySlug: string;
   departmentName: string;
@@ -635,7 +646,7 @@ export type AdminOrderDetail = {
   id: string;
   receiptNumber: string;
   currency: string;
-  subtotalNgn: number;
+  subtotal: number;
   paymentProvider: string;
   paystackReference: string;
   paystackSimulated: boolean;
@@ -892,7 +903,7 @@ export async function listAdminOrders(
       return {
         id: order._id.toString(),
         receiptNumber: order.receiptNumber,
-        subtotalNgn: order.subtotalNgn,
+        subtotal: order.subtotal,
         currency: order.currency,
         paidAt: order.paidAt.toISOString(),
         createdAt: order.createdAt.toISOString(),
@@ -952,7 +963,7 @@ export async function getAdminOrderDetail(orderId: string): Promise<AdminOrderDe
     id: order._id.toString(),
     receiptNumber: order.receiptNumber,
     currency: order.currency,
-    subtotalNgn: order.subtotalNgn,
+    subtotal: order.subtotal,
     paymentProvider: order.paymentProvider,
     paystackReference: order.paystackReference,
     paystackSimulated: order.paystackSimulated,
@@ -974,9 +985,9 @@ export async function getAdminOrderDetail(orderId: string): Promise<AdminOrderDe
             ? line.lineKind
             : null,
         title: line.title,
-        unitPriceNgn: line.unitPriceNgn,
+        unitPrice: line.unitPrice,
         quantity: line.quantity,
-        lineTotalNgn: line.lineTotalNgn,
+        lineTotal: line.lineTotal,
         categoryName: line.categoryName,
         categorySlug: line.categorySlug,
         departmentName: line.departmentName,

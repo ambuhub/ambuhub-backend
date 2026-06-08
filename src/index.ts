@@ -9,6 +9,7 @@ import { ensureServiceCategoryCatalogSeeded } from "./modules/serviceCategories/
 import { setupRoutes } from "./routes/api";
 import { setupMiddleware } from "./shared/middlewares/middleware";
 import { logger } from "./shared/lib/logger";
+import { migrateDualCurrencyWallets } from "./modules/wallet/migrateDualWallets";
 import { processDueNotificationSchedules } from "./modules/notifications/notifications.service";
 
 dotenv.config();
@@ -40,6 +41,7 @@ const startServer = async () => {
     await connectDatabase();
     await ensureAdminFromEnv();
     await ensureServiceCategoryCatalogSeeded();
+    await migrateDualCurrencyWallets();
     const NOTIFICATION_POLL_MS = 60_000;
     setInterval(() => {
       void processDueNotificationSchedules().catch((error) => {

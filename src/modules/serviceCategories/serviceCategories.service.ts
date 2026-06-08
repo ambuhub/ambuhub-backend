@@ -29,6 +29,10 @@ function toDepartmentPayload(
  */
 export async function ensureServiceCategoryCatalogSeeded(): Promise<void> {
   for (const item of SERVICE_CATEGORY_CATALOG) {
+    const existing = await ServiceCategory.findOne({ slug: item.slug }).lean();
+    if (existing && existing.catalogManaged === false) {
+      continue;
+    }
     await ServiceCategory.findOneAndUpdate(
       { slug: item.slug },
       {

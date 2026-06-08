@@ -1,5 +1,10 @@
 import type { Request, Response } from "express";
 import {
+  detectCountryFromRequest,
+  resolveMarketplaceCountry,
+} from "../../shared/currency/resolveMarketplaceCountry";
+import { isMarketplaceCountry, parseMarketplaceCountry } from "../../shared/currency/countryCurrency";
+import {
   addFavoriteServiceForUser,
   createService,
   deleteService,
@@ -24,6 +29,7 @@ type ParsedServicePayload = {
   listingType: string | null | undefined;
   stock: number | null | undefined;
   price: number | null | undefined;
+  currency: string | undefined;
   pricingPeriod: string | null | undefined;
   photoUrls: string[] | undefined;
   countryCode: string | undefined;
@@ -93,6 +99,10 @@ function parseServicePayload(body: Record<string, unknown>): ParsedServicePayloa
     listingType,
     stock,
     price,
+    currency:
+      body.currency !== undefined && body.currency !== null
+        ? String(body.currency)
+        : undefined,
     pricingPeriod,
     photoUrls,
     countryCode,
@@ -100,6 +110,48 @@ function parseServicePayload(body: Record<string, unknown>): ParsedServicePayloa
     officeAddress,
     hireReturnWindow,
   };
+}
+
+function parseOptionalNumber(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === "") {
+    return undefined;
+  }
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseMarketplaceSort(raw: unknown): "price_asc" | "price_desc" | "newest" | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const v = raw.trim().toLowerCase();
+  if (v === "price_asc" || v === "price_desc" || v === "newest") {
+    return v;
+  }
+  return undefined;
+}
+
+async function resolveMarketplaceCountryFromRequest(req: Request) {
+  const queryRaw = req.query.countryCode;
+  const queryCountry =
+    typeof queryRaw === "string"
+      ? queryRaw
+      : Array.isArray(queryRaw) && typeof queryRaw[0] === "string"
+        ? queryRaw[0]
+        : null;
+
+  const geoCountry = detectCountryFromRequest({
+    "cf-ipcountry":
+      typeof req.headers["cf-ipcountry"] === "string"
+        ? req.headers["cf-ipcountry"]
+        : undefined,
+    "x-vercel-ip-country":
+      typeof req.headers["x-vercel-ip-country"] === "string"
+        ? req.headers["x-vercel-ip-country"]
+        : undefined,
+  });
+
+  return resolveMarketplaceCountry({ geoCountry, queryCountry });
 }
 
 export async function getMarketplaceServices(
@@ -124,7 +176,17 @@ export async function getMarketplaceServices(
       return;
     }
 
-    const { services, bannerUrl } = await listMarketplaceServices(categorySlug);
+    const { countryCode } = await resolveMarketplaceCountryFromRequest(req);
+    const sort = parseMarketplaceSort(req.query.sort);
+    const priceMin = parseOptionalNumber(req.query.priceMin);
+    const priceMax = parseOptionalNumber(req.query.priceMax);
+
+    const { services, bannerUrl } = await listMarketplaceServices(categorySlug, {
+      countryCode,
+      sort,
+      priceMin,
+      priceMax,
+    });
     res.status(200).json({ services, bannerUrl });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
@@ -141,7 +203,19 @@ export async function getMarketplaceServiceByIdHandler(
 ): Promise<void> {
   try {
     const serviceId = typeof req.params.serviceId === "string" ? req.params.serviceId : "";
-    const service = await getMarketplaceServiceById(serviceId);
+    const queryRaw = req.query.countryCode;
+    const queryCountry =
+      typeof queryRaw === "string"
+        ? queryRaw
+        : Array.isArray(queryRaw) && typeof queryRaw[0] === "string"
+          ? queryRaw[0]
+          : null;
+    const service = await getMarketplaceServiceById(
+      serviceId,
+      queryCountry && isMarketplaceCountry(queryCountry)
+        ? parseMarketplaceCountry(queryCountry)
+        : undefined,
+    );
     res.status(200).json({ service });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
@@ -161,7 +235,6 @@ export async function getMyServices(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-
     const services = await listMyServices(req.auth.userId);
     res.status(200).json({ services });
   } catch (err: unknown) {
@@ -175,14 +248,13 @@ export async function getMyServices(
 
 export async function getMyServiceByIdHandler(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     if (!req.auth) {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-
     const rawId = req.params.serviceId;
     const serviceId = typeof rawId === "string" ? rawId : "";
     const service = await getMyServiceById(req.auth.userId, serviceId);
@@ -198,14 +270,13 @@ export async function getMyServiceByIdHandler(
 
 export async function deleteMyService(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     if (!req.auth) {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-
     const rawId = req.params.id;
     const serviceId = typeof rawId === "string" ? rawId : "";
     await deleteService(req.auth.userId, serviceId);
@@ -221,17 +292,15 @@ export async function deleteMyService(
 
 export async function postCreateService(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     if (!req.auth) {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-
     const body = req.body as Record<string, unknown>;
     const payload = parseServicePayload(body);
-
     const service = await createService(req.auth.userId, {
       title: payload.title,
       description: payload.description,
@@ -247,7 +316,6 @@ export async function postCreateService(
       officeAddress: payload.officeAddress,
       hireReturnWindow: payload.hireReturnWindow,
     });
-
     res.status(201).json({ service });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
@@ -260,19 +328,17 @@ export async function postCreateService(
 
 export async function putUpdateService(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     if (!req.auth) {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-
     const body = req.body as Record<string, unknown>;
     const payload = parseServicePayload(body);
     const rawServiceId = req.params.id;
     const serviceId = typeof rawServiceId === "string" ? rawServiceId : "";
-
     const service = await updateService(req.auth.userId, {
       serviceId,
       title: payload.title,
@@ -289,7 +355,6 @@ export async function putUpdateService(
       officeAddress: payload.officeAddress,
       hireReturnWindow: payload.hireReturnWindow,
     });
-
     res.status(200).json({ service });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
@@ -302,14 +367,13 @@ export async function putUpdateService(
 
 export async function patchServiceAvailability(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     if (!req.auth) {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-
     const rawId = req.params.id;
     const serviceId = typeof rawId === "string" ? rawId : "";
     const body = req.body as Record<string, unknown>;
@@ -344,7 +408,11 @@ export async function getMyFavoriteServicesHandler(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const services = await listFavoriteServicesForUser(req.auth.userId);
+    const { countryCode } = await resolveMarketplaceCountryFromRequest(req);
+    const services = await listFavoriteServicesForUser(
+      req.auth.userId,
+      countryCode,
+    );
     res.status(200).json({ services });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
@@ -371,10 +439,7 @@ export async function postAddFavoriteHandler(
       res.status(400).json({ message: "serviceId is required" });
       return;
     }
-    const services = await addFavoriteServiceForUser(
-      req.auth.userId,
-      serviceId,
-    );
+    const services = await addFavoriteServiceForUser(req.auth.userId, serviceId);
     res.status(200).json({ services });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {
@@ -390,8 +455,7 @@ export async function getBookingAvailabilityHandler(
   res: Response,
 ): Promise<void> {
   try {
-    const serviceId =
-      typeof req.params.serviceId === "string" ? req.params.serviceId : "";
+    const serviceId = typeof req.params.serviceId === "string" ? req.params.serviceId : "";
     const from = typeof req.query.from === "string" ? req.query.from : "";
     const to = typeof req.query.to === "string" ? req.query.to : "";
     if (!from || !to) {
@@ -418,8 +482,7 @@ export async function patchBookingSettingsHandler(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const serviceId =
-      typeof req.params.serviceId === "string" ? req.params.serviceId : "";
+    const serviceId = typeof req.params.serviceId === "string" ? req.params.serviceId : "";
     const body = req.body as Record<string, unknown>;
     const priceRaw = body.price;
     const price =
@@ -451,7 +514,6 @@ export async function patchBookingSettingsHandler(
       res.status(400).json({ message: "isAvailable must be a boolean" });
       return;
     }
-
     const service = await updateBookingSettings(req.auth.userId, serviceId, {
       bookingWindow: body.bookingWindow,
       hourlyBookingSchedule: body.hourlyBookingSchedule,
@@ -486,10 +548,7 @@ export async function deleteFavoriteHandler(
       res.status(400).json({ message: "serviceId is required" });
       return;
     }
-    const services = await removeFavoriteServiceForUser(
-      req.auth.userId,
-      serviceId,
-    );
+    const services = await removeFavoriteServiceForUser(req.auth.userId, serviceId);
     res.status(200).json({ services });
   } catch (err: unknown) {
     if (err instanceof ServicesHttpError) {

@@ -3,7 +3,7 @@ import { Router } from "express";
 import multer from "multer";
 import {
   authenticate,
-  requireServiceProvider,
+  requireServiceProviderOrAdmin,
 } from "../../shared/middlewares/authenticate";
 import { MAX_BYTES, MAX_FILES } from "./uploads.service";
 import { postServiceImages } from "./uploads.controller";
@@ -54,7 +54,7 @@ function handleServiceImagesUpload(
 router.post(
   "/service-images",
   authenticate,
-  requireServiceProvider,
+  requireServiceProviderOrAdmin,
   handleServiceImagesUpload,
   postServiceImages
 );

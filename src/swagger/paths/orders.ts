@@ -118,7 +118,7 @@
  *   get:
  *     tags: [Orders]
  *     summary: Provider sales aggregated by month
- *     description: Service provider only. Returns monthly sales totals for a calendar year (UTC).
+ *     description: Service provider only. Returns monthly sales totals for a calendar year (UTC), filtered by currency. Totals sum only this provider's order lines in the selected currency.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -130,9 +130,16 @@
  *           minimum: 2000
  *           maximum: 2100
  *         example: 2026
+ *       - in: query
+ *         name: currency
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [NGN, GHS]
+ *         example: NGN
  *     responses:
  *       200:
- *         description: Monthly sales breakdown (12 buckets, yearMonth + label + totalNgn)
+ *         description: Monthly sales breakdown (12 buckets, yearMonth + label + total)
  *         content:
  *           application/json:
  *             schema:
