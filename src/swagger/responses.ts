@@ -2025,4 +2025,308 @@
  *       properties:
  *         count:
  *           type: integer
+ *
+ *     ProviderSubscriptionStatus:
+ *       type: object
+ *       required: [plan, interval, expiresAt, isActive]
+ *       properties:
+ *         plan:
+ *           type: string
+ *           enum: [free, premium]
+ *         interval:
+ *           type: string
+ *           nullable: true
+ *           enum: [monthly, yearly, null]
+ *         expiresAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         isActive:
+ *           type: boolean
+ *       example:
+ *         plan: premium
+ *         interval: monthly
+ *         expiresAt: "2026-07-27T12:00:00.000Z"
+ *         isActive: true
+ *
+ *     ProviderSubscriptionResponse:
+ *       type: object
+ *       required: [subscription]
+ *       properties:
+ *         subscription:
+ *           $ref: '#/components/schemas/ProviderSubscriptionStatus'
+ *
+ *     ProviderSubscriptionInitializeRequest:
+ *       type: object
+ *       required: [interval]
+ *       properties:
+ *         interval:
+ *           type: string
+ *           enum: [monthly, yearly]
+ *       example:
+ *         interval: monthly
+ *
+ *     ProviderSubscriptionVerifyResponse:
+ *       type: object
+ *       required: [subscription, message]
+ *       properties:
+ *         subscription:
+ *           $ref: '#/components/schemas/ProviderSubscriptionStatus'
+ *         message:
+ *           type: string
+ *
+ *     MarketplaceCountryResponse:
+ *       type: object
+ *       required: [countryCode, source]
+ *       properties:
+ *         countryCode:
+ *           type: string
+ *           enum: [NG, GH]
+ *         source:
+ *           type: string
+ *           enum: [geo, fallback]
+ *       example:
+ *         countryCode: NG
+ *         source: geo
+ *
+ *     AdminCategory:
+ *       type: object
+ *       required: [id, name, slug, catalogManaged, departments, createdAt, updatedAt]
+ *       properties:
+ *         id:
+ *           type: string
+ *         name:
+ *           type: string
+ *         slug:
+ *           type: string
+ *         catalogManaged:
+ *           type: boolean
+ *         departments:
+ *           type: array
+ *           items:
+ *             type: object
+ *             required: [name, slug, order]
+ *             properties:
+ *               name:
+ *                 type: string
+ *               slug:
+ *                 type: string
+ *               order:
+ *                 type: integer
+ *         thumbnailUrl:
+ *           type: string
+ *         bannerUrl:
+ *           type: string
+ *         note:
+ *           type: string
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     AdminCategoriesListResponse:
+ *       type: object
+ *       required: [categories]
+ *       properties:
+ *         categories:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminCategory'
+ *
+ *     AdminCategoryResponse:
+ *       type: object
+ *       required: [category]
+ *       properties:
+ *         category:
+ *           $ref: '#/components/schemas/AdminCategory'
+ *
+ *     AdminCategoryCreateRequest:
+ *       type: object
+ *       required: [name]
+ *       properties:
+ *         name:
+ *           type: string
+ *         departments:
+ *           type: array
+ *           items:
+ *             type: object
+ *             required: [name]
+ *             properties:
+ *               name:
+ *                 type: string
+ *         thumbnailUrl:
+ *           type: string
+ *           nullable: true
+ *         bannerUrl:
+ *           type: string
+ *           nullable: true
+ *
+ *     AdminCategoryPatchRequest:
+ *       type: object
+ *       properties:
+ *         name:
+ *           type: string
+ *         addDepartments:
+ *           type: array
+ *           items:
+ *             type: object
+ *             required: [name]
+ *             properties:
+ *               name:
+ *                 type: string
+ *         updateDepartments:
+ *           type: array
+ *           items:
+ *             type: object
+ *             required: [slug, name]
+ *             properties:
+ *               slug:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *         thumbnailUrl:
+ *           type: string
+ *           nullable: true
+ *         bannerUrl:
+ *           type: string
+ *           nullable: true
+ *
+ *     AdminListingStatusCounts:
+ *       type: object
+ *       required: [all, live, taken_down]
+ *       properties:
+ *         all:
+ *           type: integer
+ *         live:
+ *           type: integer
+ *         taken_down:
+ *           type: integer
+ *
+ *     AdminListingListItem:
+ *       type: object
+ *       required:
+ *         - id
+ *         - title
+ *         - categoryName
+ *         - categorySlug
+ *         - departmentName
+ *         - providerUserId
+ *         - providerName
+ *         - providerEmail
+ *         - isLive
+ *         - currency
+ *         - updatedAt
+ *         - createdAt
+ *       properties:
+ *         id:
+ *           type: string
+ *         title:
+ *           type: string
+ *         listingType:
+ *           type: string
+ *           nullable: true
+ *           enum: [sale, hire, book, null]
+ *         categoryName:
+ *           type: string
+ *         categorySlug:
+ *           type: string
+ *         departmentName:
+ *           type: string
+ *         providerUserId:
+ *           type: string
+ *         providerName:
+ *           type: string
+ *         providerEmail:
+ *           type: string
+ *         businessName:
+ *           type: string
+ *           nullable: true
+ *         isLive:
+ *           type: boolean
+ *         stock:
+ *           type: number
+ *           nullable: true
+ *         price:
+ *           type: number
+ *           nullable: true
+ *         currency:
+ *           type: string
+ *           enum: [NGN, GHS]
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     AdminListingDetail:
+ *       allOf:
+ *         - $ref: '#/components/schemas/AdminListingListItem'
+ *         - type: object
+ *           required: [description, departmentSlug, photoUrls]
+ *           properties:
+ *             description:
+ *               type: string
+ *             departmentSlug:
+ *               type: string
+ *             photoUrls:
+ *               type: array
+ *               items:
+ *                 type: string
+ *             countryCode:
+ *               type: string
+ *               nullable: true
+ *             stateProvince:
+ *               type: string
+ *               nullable: true
+ *             stateProvinceName:
+ *               type: string
+ *               nullable: true
+ *             officeAddress:
+ *               type: string
+ *               nullable: true
+ *             pricingPeriod:
+ *               type: string
+ *               nullable: true
+ *             provider:
+ *               nullable: true
+ *               allOf:
+ *                 - $ref: '#/components/schemas/MarketplaceListingProvider'
+ *             hireReturnWindow:
+ *               nullable: true
+ *             bookingWindow:
+ *               nullable: true
+ *             hourlyBookingSchedule:
+ *               nullable: true
+ *             bookingGapHours:
+ *               type: number
+ *               nullable: true
+ *
+ *     AdminListingsListResponse:
+ *       type: object
+ *       required: [listings, page, limit, total, totalPages, counts]
+ *       properties:
+ *         listings:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminListingListItem'
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         counts:
+ *           $ref: '#/components/schemas/AdminListingStatusCounts'
+ *
+ *     AdminListingDetailResponse:
+ *       type: object
+ *       required: [listing]
+ *       properties:
+ *         listing:
+ *           $ref: '#/components/schemas/AdminListingDetail'
  */
