@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import swaggerUi from "swagger-ui-express";
 import { initCloudinary } from "./config/cloudinary";
+import { initPaystack } from "./config/paystack";
 import { connectDatabase } from "./config/database";
 import { swaggerSpec } from "./config/swagger";
 import { ensureAdminFromEnv } from "./modules/admin/ensureAdminFromEnv";
@@ -38,6 +39,7 @@ const PORT = process.env.PORT || 3002;
 const startServer = async () => {
   try {
     initCloudinary();
+    initPaystack();
     await connectDatabase();
     await ensureAdminFromEnv();
     await ensureServiceCategoryCatalogSeeded();
@@ -56,7 +58,10 @@ const startServer = async () => {
       logger.info(`Server started on port ${PORT}`);
     });
   } catch (error) {
-    logger.error("Failed to start server", { error });
+    logger.error("Failed to start server", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     process.exit(1);
   }
 };

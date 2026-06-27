@@ -333,21 +333,65 @@ export async function listMarketplaceServices(
     }
   }
 
-  let sort: Record<string, 1 | -1> = { createdAt: -1 };
+  let secondarySort: Record<string, 1 | -1> = { createdAt: -1 };
   if (options.sort === "price_asc") {
-    sort = { price: 1, createdAt: -1 };
+    secondarySort = { price: 1, createdAt: -1 };
   } else if (options.sort === "price_desc") {
-    sort = { price: -1, createdAt: -1 };
+    secondarySort = { price: -1, createdAt: -1 };
   }
 
-  const rows = await Service.find(query)
-    .populate<{ serviceCategoryId: PopulatedCategory | null }>(
-      "serviceCategoryId",
-      "name slug departments"
-    )
-    .sort(sort)
-    .limit(MARKETPLACE_LISTING_CAP)
-    .lean();
+  const now = new Date();
+  const rows = await Service.aggregate([
+    { $match: query },
+    {
+      $lookup: {
+        from: "serviceProviders",
+        localField: "userId",
+        foreignField: "userId",
+        as: "_provider",
+      },
+    },
+    {
+      $addFields: {
+        _isPremium: {
+          $gt: [
+            {
+              $size: {
+                $filter: {
+                  input: "$_provider",
+                  as: "p",
+                  cond: {
+                    $and: [
+                      { $eq: ["$$p.subscriptionPlan", "premium"] },
+                      { $gt: ["$$p.subscriptionExpiresAt", now] },
+                    ],
+                  },
+                },
+              },
+            },
+            0,
+          ],
+        },
+      },
+    },
+    { $sort: { _isPremium: -1, ...secondarySort } },
+    { $limit: MARKETPLACE_LISTING_CAP },
+    {
+      $lookup: {
+        from: "serviceCategories",
+        localField: "serviceCategoryId",
+        foreignField: "_id",
+        as: "serviceCategoryId",
+      },
+    },
+    {
+      $unwind: {
+        path: "$serviceCategoryId",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    { $project: { _provider: 0, _isPremium: 0 } },
+  ]);
 
   return {
     services: rows.map((doc) => mapLeanServiceToDto(doc as LeanPopulatedService)),

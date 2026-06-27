@@ -745,6 +745,75 @@
  *             createdAt: "2026-05-10T14:30:00.000Z"
  *             lineCount: 1
  *
+ *     PaystackInitializeResponse:
+ *       type: object
+ *       required: [payment]
+ *       properties:
+ *         payment:
+ *           type: object
+ *           required: [authorizationUrl, accessCode, reference, publicKey, amount, currency, email]
+ *           properties:
+ *             authorizationUrl:
+ *               type: string
+ *               description: Paystack-hosted payment page URL (fallback to redirect flow).
+ *             accessCode:
+ *               type: string
+ *             reference:
+ *               type: string
+ *               description: Unique checkout reference; pass this to the verify endpoint.
+ *             publicKey:
+ *               type: string
+ *               description: Paystack public key for the inline popup.
+ *             amount:
+ *               type: integer
+ *               description: Amount in minor units (kobo/pesewas).
+ *             currency:
+ *               type: string
+ *               enum: [NGN, GHS]
+ *             email:
+ *               type: string
+ *       example:
+ *         payment:
+ *           authorizationUrl: "https://checkout.paystack.com/abc123"
+ *           accessCode: "access_code_xyz"
+ *           reference: "AMB-9F2C7A1B4D5E6F708192A3B4"
+ *           publicKey: "pk_test_xxx"
+ *           amount: 10000000
+ *           currency: "NGN"
+ *           email: "buyer@example.com"
+ *
+ *     PaystackVerifyResponse:
+ *       type: object
+ *       required: [order, message]
+ *       properties:
+ *         order:
+ *           $ref: '#/components/schemas/OrderDetail'
+ *         message:
+ *           type: string
+ *       example:
+ *         order:
+ *           id: "507f1f77bcf86cd799439030"
+ *           receiptNumber: "RCP-2026-00042"
+ *           currency: "NGN"
+ *           subtotalNgn: 100000
+ *           paymentProvider: "paystack"
+ *           paystackReference: "AMB-9F2C7A1B4D5E6F708192A3B4"
+ *           paystackSimulated: false
+ *         message: "Payment completed successfully."
+ *
+ *     PaystackConfigResponse:
+ *       type: object
+ *       required: [enabled]
+ *       properties:
+ *         enabled:
+ *           type: boolean
+ *         publicKey:
+ *           type: string
+ *           nullable: true
+ *       example:
+ *         enabled: true
+ *         publicKey: "pk_test_xxx"
+ *
  *     SimulateCheckoutResponse:
  *       type: object
  *       required: [order, message]

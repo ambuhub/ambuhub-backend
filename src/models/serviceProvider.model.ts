@@ -12,6 +12,17 @@ const serviceProviderSchema = new mongoose.Schema(
     businessName: { type: String, required: true, trim: true },
     website: { type: String, trim: true },
     physicalAddress: { type: String, required: true, trim: true },
+    subscriptionPlan: {
+      type: String,
+      enum: ["free", "premium"],
+      default: "free",
+    },
+    subscriptionInterval: {
+      type: String,
+      enum: ["monthly", "yearly"],
+      default: null,
+    },
+    subscriptionExpiresAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

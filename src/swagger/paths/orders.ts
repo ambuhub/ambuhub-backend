@@ -1,23 +1,40 @@
 /**
  * @openapi
- * /api/orders/checkout/simulate-paystack:
- *   post:
+ * /api/orders/paystack/config:
+ *   get:
  *     tags: [Orders]
- *     summary: Simulate sale checkout (Paystack)
+ *     summary: Paystack checkout config
  *     description: |
- *       Checks out the current user's cart as a simulated Paystack payment (sale items).
- *       Response `order.lines[]` includes `photoUrls` from each listing's live catalog photos.
- *     security:
- *       - cookieAuth: []
+ *       Returns whether Paystack is enabled on the server and the public key for the
+ *       client-side inline popup. Public endpoint (no authentication required).
  *     responses:
- *       201:
- *         description: Order created (lines include `photoUrls`)
+ *       200:
+ *         description: Paystack availability and public key
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/SimulateCheckoutResponse'
+ *               $ref: '#/components/schemas/PaystackConfigResponse'
+ *
+ * /api/orders/checkout/paystack/initialize:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Initialize sale checkout (Paystack)
+ *     description: |
+ *       Phase 1 of the cart (sale) checkout. Validates the cart, reserves stock, creates a
+ *       pending checkout (30-min TTL) and initializes a Paystack transaction. Returns the
+ *       `payment` object used to open the Paystack popup. No order is created until the
+ *       payment is verified.
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: Paystack transaction initialized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaystackInitializeResponse'
  *       400:
- *         description: Empty cart or validation error
+ *         description: Empty cart, validation error, or amount below Paystack minimum
  *         content:
  *           application/json:
  *             schema:
@@ -34,16 +51,34 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
+ *       422:
+ *         description: Currency not supported by the Paystack merchant
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       502:
+ *         description: Paystack could not initialize the payment
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       503:
+ *         description: Paystack is not configured on the server
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
  *
- * /api/orders/hire-checkout/simulate-paystack:
+ * /api/orders/hire-checkout/paystack/initialize:
  *   post:
  *     tags: [Orders]
- *     summary: Simulate hire checkout (Paystack)
+ *     summary: Initialize hire checkout (Paystack)
  *     description: |
- *       Creates a hire order for a single service with a date range.
- *       The listing must have a `hireReturnWindow`. `hireEnd` must fall on an allowed return
- *       weekday and within return hours (Africa/Lagos WAT); daily+ periods use `timeEnd` on
- *       the selected return date. Response `order.lines[]` includes `photoUrls`.
+ *       Phase 1 of hire checkout for a single service with a date range. The listing must have
+ *       a `hireReturnWindow`. `hireEnd` must fall on an allowed return weekday and within return
+ *       hours (Africa/Lagos WAT). Reserves stock, creates a pending checkout and initializes a
+ *       Paystack transaction.
  *     security:
  *       - cookieAuth: []
  *     requestBody:
@@ -53,12 +88,12 @@
  *           schema:
  *             $ref: '#/components/schemas/HireCheckoutRequest'
  *     responses:
- *       201:
- *         description: Hire order created (lines include `photoUrls`)
+ *       200:
+ *         description: Paystack transaction initialized
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/SimulateCheckoutResponse'
+ *               $ref: '#/components/schemas/PaystackInitializeResponse'
  *       400:
  *         description: Invalid hire dates, service, or quantity
  *         content:
@@ -71,15 +106,33 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
+ *       422:
+ *         description: Currency not supported by the Paystack merchant
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       502:
+ *         description: Paystack could not initialize the payment
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       503:
+ *         description: Paystack is not configured on the server
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
  *
- * /api/orders/book-checkout/simulate-paystack:
+ * /api/orders/book-checkout/paystack/initialize:
  *   post:
  *     tags: [Orders]
- *     summary: Simulate personnel booking checkout (Paystack)
+ *     summary: Initialize personnel booking checkout (Paystack)
  *     description: |
- *       Creates a book order for a single personnel or ambulance-servicing listing.
- *       Requires bookingWindow, price, and pricingPeriod on the listing. Validates
- *       free range and gap between bookings. Response `order.lines[]` includes `photoUrls`.
+ *       Phase 1 of booking checkout for a single personnel or ambulance-servicing listing.
+ *       Requires bookingWindow, price, and pricingPeriod on the listing. Validates free range
+ *       and gap between bookings, then initializes a Paystack transaction.
  *     security:
  *       - cookieAuth: []
  *     requestBody:
@@ -89,12 +142,12 @@
  *           schema:
  *             $ref: '#/components/schemas/BookCheckoutRequest'
  *     responses:
- *       201:
- *         description: Book order created (lines include `photoUrls`)
+ *       200:
+ *         description: Paystack transaction initialized
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/SimulateCheckoutResponse'
+ *               $ref: '#/components/schemas/PaystackInitializeResponse'
  *       400:
  *         description: Invalid booking dates or service
  *         content:
@@ -109,6 +162,141 @@
  *               $ref: '#/components/schemas/ErrorMessage'
  *       409:
  *         description: Time slot conflict
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       422:
+ *         description: Currency not supported by the Paystack merchant
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       502:
+ *         description: Paystack could not initialize the payment
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       503:
+ *         description: Paystack is not configured on the server
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/orders/paystack/verify:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Verify Paystack payment and fulfill order
+ *     description: |
+ *       Phase 2 of checkout. Verifies the transaction with Paystack using the `reference` from
+ *       the initialize step. On success, creates the Order + Receipt, credits seller wallets,
+ *       sends notifications, and (for sale) clears the cart. Idempotent: returns the existing
+ *       order if the reference was already fulfilled. Response `order.lines[]` includes `photoUrls`.
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reference]
+ *             properties:
+ *               reference:
+ *                 type: string
+ *                 description: The checkout reference returned by the initialize endpoint.
+ *           example:
+ *             reference: "AMB-9F2C7A1B4D5E6F708192A3B4"
+ *     responses:
+ *       201:
+ *         description: Payment verified and order fulfilled
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaystackVerifyResponse'
+ *       400:
+ *         description: Missing reference or paid amount mismatch
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       402:
+ *         description: Payment was not successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Reference belongs to another account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       404:
+ *         description: Checkout session not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       409:
+ *         description: Checkout session no longer active
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       410:
+ *         description: Checkout session expired
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       502:
+ *         description: Paystack could not verify the payment
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/orders/paystack/cancel:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Cancel a pending Paystack checkout
+ *     description: |
+ *       Cancels a pending checkout (e.g. when the user closes the Paystack popup) and releases
+ *       any reserved stock for sale/hire checkouts. Idempotent and always returns 204.
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reference]
+ *             properties:
+ *               reference:
+ *                 type: string
+ *           example:
+ *             reference: "AMB-9F2C7A1B4D5E6F708192A3B4"
+ *     responses:
+ *       204:
+ *         description: Pending checkout cancelled (or already inactive)
+ *       400:
+ *         description: Missing reference
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       401:
+ *         description: Not authenticated
  *         content:
  *           application/json:
  *             schema:

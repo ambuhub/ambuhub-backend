@@ -58,7 +58,7 @@ const orderSchema = new mongoose.Schema(
     paymentProvider: {
       type: String,
       required: true,
-      enum: ["paystack_simulated"],
+      enum: ["paystack", "paystack_simulated"],
     },
     paystackReference: { type: String, required: true },
     paystackSimulated: { type: Boolean, required: true, default: true },

@@ -12,12 +12,36 @@ import {
   listProviderPersonnelBookings,
   listProviderSales,
   OrdersHttpError,
-  simulateBookPaystackCheckout,
-  simulateHirePaystackCheckout,
-  simulatePaystackCheckout,
 } from "./orders.service";
+import {
+  cancelPaystackCheckout,
+  getPaystackCheckoutConfig,
+  initializeBookPaystackCheckout,
+  initializeHirePaystackCheckout,
+  initializeSalePaystackCheckout,
+  verifyPaystackCheckout,
+} from "./paystack-checkout.service";
 
-export async function postSimulateCheckoutHandler(
+function handleOrdersError(res: Response, err: unknown): boolean {
+  if (err instanceof OrdersHttpError) {
+    res.status(err.statusCode).json({ message: err.message });
+    return true;
+  }
+  if (err instanceof CartHttpError) {
+    res.status(err.statusCode).json({ message: err.message });
+    return true;
+  }
+  return false;
+}
+
+export async function getPaystackConfigHandler(
+  _req: Request,
+  res: Response,
+): Promise<void> {
+  res.status(200).json(getPaystackCheckoutConfig());
+}
+
+export async function postSalePaystackInitializeHandler(
   req: Request,
   res: Response,
 ): Promise<void> {
@@ -26,22 +50,17 @@ export async function postSimulateCheckoutHandler(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const result = await simulatePaystackCheckout(req.auth.userId);
-    res.status(201).json(result);
+    const payment = await initializeSalePaystackCheckout(req.auth.userId);
+    res.status(200).json({ payment });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
-      return;
-    }
-    if (err instanceof CartHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
   }
 }
 
-export async function postHireSimulateCheckoutHandler(
+export async function postHirePaystackInitializeHandler(
   req: Request,
   res: Response,
 ): Promise<void> {
@@ -50,22 +69,20 @@ export async function postHireSimulateCheckoutHandler(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const result = await simulateHirePaystackCheckout(req.auth.userId, req.body ?? {});
-    res.status(201).json(result);
+    const payment = await initializeHirePaystackCheckout(
+      req.auth.userId,
+      req.body ?? {},
+    );
+    res.status(200).json({ payment });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
-      return;
-    }
-    if (err instanceof CartHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
   }
 }
 
-export async function postBookSimulateCheckoutHandler(
+export async function postBookPaystackInitializeHandler(
   req: Request,
   res: Response,
 ): Promise<void> {
@@ -74,15 +91,55 @@ export async function postBookSimulateCheckoutHandler(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const result = await simulateBookPaystackCheckout(req.auth.userId, req.body ?? {});
-    res.status(201).json(result);
+    const payment = await initializeBookPaystackCheckout(
+      req.auth.userId,
+      req.body ?? {},
+    );
+    res.status(200).json({ payment });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
-    if (err instanceof CartHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    throw err;
+  }
+}
+
+export async function postPaystackVerifyHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const reference =
+      typeof req.body?.reference === "string" ? req.body.reference : "";
+    const result = await verifyPaystackCheckout(req.auth.userId, reference);
+    res.status(201).json(result);
+  } catch (err: unknown) {
+    if (handleOrdersError(res, err)) {
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function postPaystackCancelHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const reference =
+      typeof req.body?.reference === "string" ? req.body.reference : "";
+    await cancelPaystackCheckout(req.auth.userId, reference);
+    res.status(204).send();
+  } catch (err: unknown) {
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -101,8 +158,7 @@ export async function getProviderHireBookingsHandler(
     const bookings = await listProviderHireBookings(req.auth.userId);
     res.status(200).json({ bookings });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -121,8 +177,7 @@ export async function getProviderPersonnelBookingsHandler(
     const bookings = await listProviderPersonnelBookings(req.auth.userId);
     res.status(200).json({ bookings });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -141,8 +196,7 @@ export async function getProviderSalesHandler(
     const sales = await listProviderSales(req.auth.userId);
     res.status(200).json({ sales });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -173,8 +227,7 @@ export async function getProviderSalesByMonthHandler(
     const months = await getProviderSalesByMonth(req.auth.userId, year, currency);
     res.status(200).json({ year, currency, months });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -190,8 +243,7 @@ export async function listMyOrdersHandler(req: Request, res: Response): Promise<
     const orders = await listMyOrders(req.auth.userId);
     res.status(200).json({ orders });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -208,8 +260,7 @@ export async function getMyOrderHandler(req: Request, res: Response): Promise<vo
     const order = await getMyOrderById(req.auth.userId, orderId);
     res.status(200).json({ order });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -225,8 +276,7 @@ export async function listMyReceiptsHandler(req: Request, res: Response): Promis
     const receipts = await listMyReceipts(req.auth.userId);
     res.status(200).json({ receipts });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;
@@ -246,8 +296,7 @@ export async function getMyReceiptByOrderHandler(
     const receipt = await getMyReceiptByOrderId(req.auth.userId, orderId);
     res.status(200).json({ receipt });
   } catch (err: unknown) {
-    if (err instanceof OrdersHttpError) {
-      res.status(err.statusCode).json({ message: err.message });
+    if (handleOrdersError(res, err)) {
       return;
     }
     throw err;

@@ -3,30 +3,37 @@ import { authenticate, requireServiceProvider } from "../../shared/middlewares/a
 import {
   getMyOrderHandler,
   getMyReceiptByOrderHandler,
+  getPaystackConfigHandler,
   getProviderHireBookingsHandler,
   getProviderPersonnelBookingsHandler,
   getProviderSalesHandler,
   getProviderSalesByMonthHandler,
   listMyOrdersHandler,
   listMyReceiptsHandler,
-  postBookSimulateCheckoutHandler,
-  postHireSimulateCheckoutHandler,
-  postSimulateCheckoutHandler,
+  postBookPaystackInitializeHandler,
+  postHirePaystackInitializeHandler,
+  postPaystackCancelHandler,
+  postPaystackVerifyHandler,
+  postSalePaystackInitializeHandler,
 } from "./orders.controller";
 
 const router = Router();
 
-router.post("/checkout/simulate-paystack", authenticate, postSimulateCheckoutHandler);
+router.get("/paystack/config", getPaystackConfigHandler);
+router.post("/checkout/paystack/initialize", authenticate, postSalePaystackInitializeHandler);
 router.post(
-  "/hire-checkout/simulate-paystack",
+  "/hire-checkout/paystack/initialize",
   authenticate,
-  postHireSimulateCheckoutHandler,
+  postHirePaystackInitializeHandler,
 );
 router.post(
-  "/book-checkout/simulate-paystack",
+  "/book-checkout/paystack/initialize",
   authenticate,
-  postBookSimulateCheckoutHandler,
+  postBookPaystackInitializeHandler,
 );
+router.post("/paystack/verify", authenticate, postPaystackVerifyHandler);
+router.post("/paystack/cancel", authenticate, postPaystackCancelHandler);
+
 router.get(
   "/provider/sales-by-month",
   authenticate,

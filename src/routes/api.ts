@@ -12,6 +12,7 @@ import reviewsRoutes from "../modules/reviews/reviews.routes";
 import notificationsRoutes from "../modules/notifications/notifications.routes";
 import walletRoutes from "../modules/wallet/wallet.routes";
 import marketplaceRoutes from "../modules/marketplace/marketplace.routes";
+import providerSubscriptionRoutes from "../modules/provider-subscription/subscription.routes";
 
 export const setupRoutes = (app: Application): void => {
   app.get("/health", (_req, res) => {
@@ -32,4 +33,5 @@ export const setupRoutes = (app: Application): void => {
   app.use("/api/uploads", uploadsRoutes);
   app.use("/api/wallet", walletRoutes);
   app.use("/api/marketplace", marketplaceRoutes);
+  app.use("/api/provider/subscription", providerSubscriptionRoutes);
 };
