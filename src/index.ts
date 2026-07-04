@@ -12,6 +12,7 @@ import { setupMiddleware } from "./shared/middlewares/middleware";
 import { logger } from "./shared/lib/logger";
 import { migrateDualCurrencyWallets } from "./modules/wallet/migrateDualWallets";
 import { processDueNotificationSchedules } from "./modules/notifications/notifications.service";
+import { initFirebaseAdmin } from "./shared/firebase/firebase-admin";
 
 dotenv.config();
 
@@ -40,6 +41,7 @@ const startServer = async () => {
   try {
     initCloudinary();
     initPaystack();
+    initFirebaseAdmin();
     await connectDatabase();
     await ensureAdminFromEnv();
     await ensureServiceCategoryCatalogSeeded();

@@ -1389,11 +1389,11 @@
  *           type: string
  *         type:
  *           type: string
- *           enum:
- *             - hire_return_reminder
- *             - provider_sale_purchased
- *             - provider_hire_booked
- *             - provider_hire_return_reminder
+ *         category:
+ *           type: string
+ *         priority:
+ *           type: string
+ *           enum: [critical, high, normal, low]
  *         reminderKind:
  *           type: string
  *           enum: [1d, 1h]
@@ -1402,10 +1402,21 @@
  *           type: string
  *         body:
  *           type: string
+ *         deepLink:
+ *           type: string
+ *           nullable: true
+ *         entityId:
+ *           type: string
+ *           nullable: true
+ *         data:
+ *           type: object
+ *           additionalProperties: true
  *         orderId:
  *           type: string
+ *           nullable: true
  *         serviceId:
  *           type: string
+ *           nullable: true
  *         receiptNumber:
  *           type: string
  *           nullable: true
@@ -1423,12 +1434,40 @@
  *
  *     NotificationListResponse:
  *       type: object
- *       required: [notifications]
+ *       required: [notifications, nextCursor]
  *       properties:
  *         notifications:
  *           type: array
  *           items:
  *             $ref: '#/components/schemas/Notification'
+ *         nextCursor:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *
+ *     DeviceTokenResponse:
+ *       type: object
+ *       required: [device]
+ *       properties:
+ *         device:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: string
+ *             fcmToken:
+ *               type: string
+ *             platform:
+ *               type: string
+ *               enum: [web, android, ios]
+ *             deviceName:
+ *               type: string
+ *               nullable: true
+ *             appVersion:
+ *               type: string
+ *               nullable: true
+ *             lastSeenAt:
+ *               type: string
+ *               format: date-time
  *
  *     NotificationUnreadCountResponse:
  *       type: object

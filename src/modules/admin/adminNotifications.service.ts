@@ -5,6 +5,8 @@ import {
 } from "../../models/adminNotification.model";
 import { User } from "../../models/user.model";
 import { logger } from "../../shared/lib/logger";
+import { NotificationService } from "../notifications/notification.service";
+import { NotificationTemplates } from "../notifications/notification-templates";
 
 export class AdminNotificationsHttpError extends Error {
   constructor(
@@ -19,8 +21,13 @@ export class AdminNotificationsHttpError extends Error {
 export type AdminNotificationDto = {
   id: string;
   type: AdminNotificationType;
+  category: string | null;
+  priority: string | null;
   title: string;
   body: string;
+  deepLink: string | null;
+  entityId: string | null;
+  data: Record<string, unknown>;
   conciergeRequestId: string | null;
   readAt: string | null;
   createdAt: string;
@@ -29,8 +36,13 @@ export type AdminNotificationDto = {
 function mapAdminNotification(doc: {
   _id: mongoose.Types.ObjectId;
   type: AdminNotificationType;
+  category?: string | null;
+  priority?: string | null;
   title: string;
   body: string;
+  deepLink?: string | null;
+  entityId?: string | null;
+  data?: Record<string, unknown> | null;
   conciergeRequestId?: mongoose.Types.ObjectId | null;
   readAt?: Date | null;
   createdAt: Date;
@@ -38,8 +50,13 @@ function mapAdminNotification(doc: {
   return {
     id: doc._id.toString(),
     type: doc.type,
+    category: doc.category ?? null,
+    priority: doc.priority ?? null,
     title: doc.title,
     body: doc.body,
+    deepLink: doc.deepLink ?? null,
+    entityId: doc.entityId ?? null,
+    data: (doc.data as Record<string, unknown>) ?? {},
     conciergeRequestId: doc.conciergeRequestId
       ? doc.conciergeRequestId.toString()
       : null,
@@ -69,32 +86,35 @@ export async function notifyAdminsOfConciergeRequest(input: {
     return;
   }
 
-  const title = "New concierge request";
-  const body = `${input.name} submitted a request for ${input.categoryName} · ${input.departmentName}.`;
-  const requestOid = new mongoose.Types.ObjectId(input.id);
+  const template = NotificationTemplates.conciergeRequestReceived({
+    requestId: input.id,
+    name: input.name,
+    categoryName: input.categoryName,
+    departmentName: input.departmentName,
+  });
 
-  try {
-    await AdminNotification.insertMany(
-      admins.map((admin) => ({
-        userId: admin._id,
-        type: "concierge_request_received" as const,
-        title,
-        body,
-        conciergeRequestId: requestOid,
-      })),
-    );
-  } catch (err) {
-    logger.error("Failed to create admin concierge notifications", {
-      requestId: input.id,
-      error: err,
-    });
+  for (const admin of admins) {
+    try {
+      await NotificationService.send(admin._id.toString(), template);
+    } catch (err) {
+      logger.error("Failed to create admin concierge notification", {
+        requestId: input.id,
+        adminUserId: admin._id.toString(),
+        error: err,
+      });
+    }
   }
 }
 
+export type AdminNotificationListResult = {
+  notifications: AdminNotificationDto[];
+  nextCursor: string | null;
+};
+
 export async function listAdminNotifications(
   adminUserId: string,
-  options: { unreadOnly?: boolean; limit?: number },
-): Promise<AdminNotificationDto[]> {
+  options: { unreadOnly?: boolean; limit?: number; cursor?: string },
+): Promise<AdminNotificationListResult> {
   await assertAdminUser(adminUserId);
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
   const filter: Record<string, unknown> = {
@@ -103,15 +123,29 @@ export async function listAdminNotifications(
   if (options.unreadOnly) {
     filter.readAt = { $exists: false };
   }
+  if (options.cursor) {
+    const cursorDate = new Date(options.cursor);
+    if (Number.isNaN(cursorDate.getTime())) {
+      throw new AdminNotificationsHttpError(400, "cursor must be a valid ISO8601 date");
+    }
+    filter.createdAt = { $lt: cursorDate };
+  }
 
   const rows = await AdminNotification.find(filter)
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
 
-  return rows.map((row) =>
+  const notifications = rows.map((row) =>
     mapAdminNotification(row as Parameters<typeof mapAdminNotification>[0]),
   );
+
+  const nextCursor =
+    notifications.length === limit
+      ? notifications[notifications.length - 1]?.createdAt ?? null
+      : null;
+
+  return { notifications, nextCursor };
 }
 
 export async function getAdminUnreadNotificationCount(

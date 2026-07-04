@@ -1,17 +1,31 @@
 import mongoose from "mongoose";
 import {
   Notification,
+  type NotificationCategory,
+  type NotificationPriority,
+  type NotificationReminderKind,
   type NotificationType,
 } from "../../models/notification.model";
 import {
   NotificationSchedule,
-  type NotificationReminderKind,
   type ScheduleNotificationType,
 } from "../../models/notification-schedule.model";
 import { User } from "../../models/user.model";
 import { logger } from "../../shared/lib/logger";
+import {
+  categoryForType,
+  priorityForType,
+} from "./notification-categories";
+import { formatDeadlineWat } from "./notification-format";
+import {
+  NotificationService,
+  type NotificationDto,
+} from "./notification.service";
+import { NotificationTemplates } from "./notification-templates";
 
-const LAGOS_TZ = "Africa/Lagos";
+export { formatDeadlineWat } from "./notification-format";
+export type { NotificationDto } from "./notification.service";
+
 const MS_PER_HOUR = 60 * 60 * 1000;
 const MS_PER_DAY = 24 * MS_PER_HOUR;
 const WORKER_BATCH_LIMIT = 200;
@@ -25,20 +39,6 @@ export class NotificationsHttpError extends Error {
     this.name = "NotificationsHttpError";
   }
 }
-
-export type NotificationDto = {
-  id: string;
-  type: NotificationType;
-  reminderKind: NotificationReminderKind | null;
-  title: string;
-  body: string;
-  orderId: string;
-  serviceId: string;
-  receiptNumber: string | null;
-  deadlineAt: string | null;
-  readAt: string | null;
-  createdAt: string;
-};
 
 export type OrderLineForNotifications = {
   lineKind?: "sale" | "hire" | "book";
@@ -64,54 +64,29 @@ function isBookLine(line: OrderLineForNotifications): boolean {
   return line.lineKind === "book" || line.bookEnd != null;
 }
 
-export function formatDeadlineWat(deadline: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: LAGOS_TZ,
-    weekday: "long",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(deadline);
-}
-
-function buildScheduledNotificationCopy(
-  notificationType: ScheduleNotificationType,
-  serviceTitle: string,
-  reminderKind: NotificationReminderKind,
-  deadlineAt: Date,
-): { title: string; body: string; type: NotificationType } {
-  const when = formatDeadlineWat(deadlineAt);
-
-  if (notificationType === "provider_hire_return_reminder") {
-    if (reminderKind === "1d") {
-      return {
-        type: "provider_hire_return_reminder",
-        title: "Hire return in 24 hours",
-        body: `A customer should return "${serviceTitle}" in about 24 hours (${when} WAT). Check Bookings for details.`,
-      };
-    }
-    return {
-      type: "provider_hire_return_reminder",
-      title: "Hire return in 1 hour",
-      body: `A customer should return "${serviceTitle}" in about 1 hour (${when} WAT).`,
-    };
-  }
-
-  if (reminderKind === "1d") {
-    return {
-      type: "hire_return_reminder",
-      title: "Hire return due in 24 hours",
-      body: `Your hire return for "${serviceTitle}" is due in about 24 hours (${when} WAT). View your receipt for details.`,
-    };
-  }
-  return {
-    type: "hire_return_reminder",
-    title: "Hire return due in 1 hour",
-    body: `Your hire return for "${serviceTitle}" is due in about 1 hour (${when} WAT). Please return the item on time.`,
-  };
+function mapLegacyNotification(doc: {
+  _id: mongoose.Types.ObjectId;
+  type: NotificationType;
+  category?: NotificationCategory;
+  priority?: NotificationPriority;
+  reminderKind?: NotificationReminderKind | null;
+  title: string;
+  body: string;
+  deepLink?: string | null;
+  entityId?: string | null;
+  data?: Record<string, unknown> | null;
+  orderId?: mongoose.Types.ObjectId | null;
+  serviceId?: mongoose.Types.ObjectId | null;
+  receiptNumber?: string | null;
+  deadlineAt?: Date | null;
+  readAt?: Date | null;
+  createdAt: Date;
+}): NotificationDto {
+  return NotificationService.mapNotificationDoc({
+    ...doc,
+    category: doc.category ?? categoryForType(doc.type),
+    priority: doc.priority ?? priorityForType(doc.type),
+  });
 }
 
 async function assertNotificationUser(userId: string): Promise<void> {
@@ -125,34 +100,6 @@ async function assertNotificationUser(userId: string): Promise<void> {
       "Only client and provider accounts can access notifications",
     );
   }
-}
-
-function mapNotification(doc: {
-  _id: mongoose.Types.ObjectId;
-  type: NotificationType;
-  reminderKind?: NotificationReminderKind | null;
-  title: string;
-  body: string;
-  orderId: mongoose.Types.ObjectId;
-  serviceId: mongoose.Types.ObjectId;
-  receiptNumber?: string | null;
-  deadlineAt?: Date | null;
-  readAt?: Date | null;
-  createdAt: Date;
-}): NotificationDto {
-  return {
-    id: doc._id.toString(),
-    type: doc.type,
-    reminderKind: doc.reminderKind ?? null,
-    title: doc.title,
-    body: doc.body,
-    orderId: doc.orderId.toString(),
-    serviceId: doc.serviceId.toString(),
-    receiptNumber: doc.receiptNumber ?? null,
-    deadlineAt: doc.deadlineAt ? doc.deadlineAt.toISOString() : null,
-    readAt: doc.readAt ? doc.readAt.toISOString() : null,
-    createdAt: doc.createdAt.toISOString(),
-  };
 }
 
 export async function scheduleHireReturnReminders(input: {
@@ -240,6 +187,7 @@ export async function notifyProvidersOnOrderPaid(input: {
   lines: OrderLineForNotifications[];
 }): Promise<void> {
   const buyerOid = new mongoose.Types.ObjectId(input.buyerUserId);
+  const orderId = input.orderId.toString();
 
   for (const line of input.lines) {
     if (!line.sellerUserId) {
@@ -251,43 +199,68 @@ export async function notifyProvidersOnOrderPaid(input: {
 
     const book = isBookLine(line);
     const hire = !book && isHireLine(line);
-    const title = book ? "New booking" : hire ? "New hire booking" : "New sale";
-    let body: string;
-    let notificationType: NotificationType;
-    let deadlineAt: Date | undefined;
-    if (book && line.bookEnd) {
-      const when = formatDeadlineWat(line.bookEnd);
-      body = `Your listing "${line.title}" was booked (receipt ${input.receiptNumber}). Session ends ${when} WAT.`;
-      notificationType = "provider_booking_confirmed";
-      deadlineAt = line.bookEnd;
-    } else if (hire && line.hireEnd) {
-      const when = formatDeadlineWat(line.hireEnd);
-      body = `Your listing "${line.title}" was hired (receipt ${input.receiptNumber}). Return due ${when} WAT.`;
-      notificationType = "provider_hire_booked";
-      deadlineAt = line.hireEnd;
-    } else {
-      body = `Someone purchased "${line.title}" (receipt ${input.receiptNumber}).`;
-      notificationType = "provider_sale_purchased";
-    }
+    const serviceId = line.serviceId.toString();
+    const sellerId = line.sellerUserId.toString();
 
     try {
-      await Notification.create({
-        userId: line.sellerUserId,
-        type: notificationType,
-        title,
-        body,
-        orderId: input.orderId,
-        serviceId: line.serviceId,
-        receiptNumber: input.receiptNumber,
-        ...(deadlineAt ? { deadlineAt } : {}),
-      });
+      if (book) {
+        await NotificationService.send(
+          sellerId,
+          NotificationTemplates.bookingConfirmed({
+            orderId,
+            serviceId,
+            serviceTitle: line.title,
+            receiptNumber: input.receiptNumber,
+            role: "provider",
+            bookEnd: line.bookEnd,
+          }),
+        );
+      } else if (hire) {
+        await NotificationService.send(
+          sellerId,
+          NotificationTemplates.providerHireBooked({
+            orderId,
+            serviceId,
+            serviceTitle: line.title,
+            receiptNumber: input.receiptNumber,
+            hireEnd: line.hireEnd,
+          }),
+        );
+      } else {
+        await NotificationService.send(
+          sellerId,
+          NotificationTemplates.providerSalePurchased({
+            orderId,
+            serviceId,
+            serviceTitle: line.title,
+            receiptNumber: input.receiptNumber,
+          }),
+        );
+      }
     } catch (err) {
       logger.error("Failed to create provider order notification", {
-        orderId: input.orderId.toString(),
-        sellerUserId: line.sellerUserId.toString(),
+        orderId,
+        sellerUserId: sellerId,
         error: err,
       });
     }
+  }
+
+  try {
+    await NotificationService.send(
+      input.buyerUserId,
+      NotificationTemplates.paymentSuccess({
+        orderId,
+        receiptNumber: input.receiptNumber,
+        role: "client",
+      }),
+    );
+  } catch (err) {
+    logger.error("Failed to create buyer payment notification", {
+      orderId,
+      buyerUserId: input.buyerUserId,
+      error: err,
+    });
   }
 }
 
@@ -307,22 +280,22 @@ export async function processDueNotificationSchedules(): Promise<void> {
       if (row.deadlineAt > now) {
         const notificationType = (row.notificationType ??
           "hire_return_reminder") as ScheduleNotificationType;
-        const copy = buildScheduledNotificationCopy(
-          notificationType,
-          row.serviceTitle,
-          row.reminderKind as NotificationReminderKind,
-          row.deadlineAt,
+        const role =
+          notificationType === "provider_hire_return_reminder"
+            ? "provider"
+            : "client";
+
+        await NotificationService.send(
+          row.userId.toString(),
+          NotificationTemplates.hireReturnReminder({
+            orderId: row.orderId.toString(),
+            serviceId: row.serviceId.toString(),
+            serviceTitle: row.serviceTitle,
+            deadlineAt: row.deadlineAt,
+            reminderKind: row.reminderKind as NotificationReminderKind,
+            role,
+          }),
         );
-        await Notification.create({
-          userId: row.userId,
-          type: copy.type,
-          reminderKind: row.reminderKind,
-          title: copy.title,
-          body: copy.body,
-          orderId: row.orderId,
-          serviceId: row.serviceId,
-          deadlineAt: row.deadlineAt,
-        });
       }
       await NotificationSchedule.updateOne(
         { _id: scheduleId },
@@ -337,10 +310,15 @@ export async function processDueNotificationSchedules(): Promise<void> {
   }
 }
 
+export type NotificationListResult = {
+  notifications: NotificationDto[];
+  nextCursor: string | null;
+};
+
 export async function listMyNotifications(
   userId: string,
-  options: { unreadOnly?: boolean; limit?: number },
-): Promise<NotificationDto[]> {
+  options: { unreadOnly?: boolean; limit?: number; cursor?: string },
+): Promise<NotificationListResult> {
   await assertNotificationUser(userId);
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
   const filter: Record<string, unknown> = {
@@ -349,15 +327,29 @@ export async function listMyNotifications(
   if (options.unreadOnly) {
     filter.readAt = { $exists: false };
   }
+  if (options.cursor) {
+    const cursorDate = new Date(options.cursor);
+    if (Number.isNaN(cursorDate.getTime())) {
+      throw new NotificationsHttpError(400, "cursor must be a valid ISO8601 date");
+    }
+    filter.createdAt = { $lt: cursorDate };
+  }
 
   const rows = await Notification.find(filter)
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
 
-  return rows.map((r) =>
-    mapNotification(r as Parameters<typeof mapNotification>[0]),
+  const notifications = rows.map((r) =>
+    mapLegacyNotification(r as Parameters<typeof mapLegacyNotification>[0]),
   );
+
+  const nextCursor =
+    notifications.length === limit
+      ? notifications[notifications.length - 1]?.createdAt ?? null
+      : null;
+
+  return { notifications, nextCursor };
 }
 
 export async function getUnreadNotificationCount(
@@ -393,7 +385,7 @@ export async function markNotificationRead(
     throw new NotificationsHttpError(404, "Notification not found");
   }
 
-  return mapNotification(doc as Parameters<typeof mapNotification>[0]);
+  return mapLegacyNotification(doc as Parameters<typeof mapLegacyNotification>[0]);
 }
 
 export async function markAllNotificationsRead(userId: string): Promise<number> {

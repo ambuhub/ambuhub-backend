@@ -19,6 +19,12 @@
  *           minimum: 1
  *           maximum: 100
  *           default: 50
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: ISO8601 createdAt of the last item from the previous page (newest-first pagination)
  *     responses:
  *       200:
  *         description: Notifications for the authenticated user
@@ -134,4 +140,92 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/notifications/me/devices:
+ *   put:
+ *     tags: [Notifications]
+ *     summary: Register or update an FCM device token
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [fcmToken, platform]
+ *             properties:
+ *               fcmToken:
+ *                 type: string
+ *               platform:
+ *                 type: string
+ *                 enum: [web, android, ios]
+ *               deviceName:
+ *                 type: string
+ *               appVersion:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Registered device token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DeviceTokenResponse'
+ *       401:
+ *         description: Not authenticated
+ *   delete:
+ *     tags: [Notifications]
+ *     summary: Remove an FCM device token (e.g. on logout)
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [fcmToken]
+ *             properties:
+ *               fcmToken:
+ *                 type: string
+ *     responses:
+ *       204:
+ *         description: Token removed
+ *       401:
+ *         description: Not authenticated
+ *
+ * /api/notifications/me/devices/refresh:
+ *   patch:
+ *     tags: [Notifications]
+ *     summary: Refresh an FCM token after Firebase rotation
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [newToken, platform]
+ *             properties:
+ *               oldToken:
+ *                 type: string
+ *               newToken:
+ *                 type: string
+ *               platform:
+ *                 type: string
+ *                 enum: [web, android, ios]
+ *               deviceName:
+ *                 type: string
+ *               appVersion:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Updated device token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DeviceTokenResponse'
+ *       401:
+ *         description: Not authenticated
  */

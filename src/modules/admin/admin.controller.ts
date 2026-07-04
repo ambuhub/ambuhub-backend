@@ -387,11 +387,14 @@ export async function getAdminNotificationsHandler(
     if (typeof rawLimit === "string" && /^\d+$/.test(rawLimit)) {
       limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10)));
     }
-    const notifications = await listAdminNotifications(req.auth.userId, {
+    const cursor =
+      typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+    const result = await listAdminNotifications(req.auth.userId, {
       unreadOnly,
       limit,
+      cursor,
     });
-    res.status(200).json({ notifications });
+    res.status(200).json(result);
   } catch (err) {
     handleAdminError(err, res, "Failed to load notifications");
   }

@@ -23,23 +23,29 @@ function requireJwtSecret(): string {
   return secret;
 }
 
-export function authenticate(
+function extractBearerToken(req: Request): string | null {
+  const header = req.headers.authorization;
+  if (!header || typeof header !== "string") {
+    return null;
+  }
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) {
+    return null;
+  }
+  return match[1].trim();
+}
+
+function verifyAndAttachAuth(
+  token: string,
   req: Request,
   res: Response,
-  next: NextFunction
-): void {
-  const token = req.cookies?.[AUTH_COOKIE_NAME];
-  if (!token || typeof token !== "string") {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
-  }
-
+): boolean {
   let secret: string;
   try {
     secret = requireJwtSecret();
   } catch {
     res.status(500).json({ message: "Server misconfiguration" });
-    return;
+    return false;
   }
 
   try {
@@ -48,13 +54,38 @@ export function authenticate(
     const role = typeof decoded.role === "string" ? decoded.role : "";
     if (!userId || !role) {
       res.status(401).json({ message: "Invalid token" });
-      return;
+      return false;
     }
     req.auth = { userId, role };
-    next();
+    return true;
   } catch {
     res.status(401).json({ message: "Invalid or expired token" });
+    return false;
   }
+}
+
+export function authenticate(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  const cookieToken = req.cookies?.[AUTH_COOKIE_NAME];
+  if (cookieToken && typeof cookieToken === "string") {
+    if (verifyAndAttachAuth(cookieToken, req, res)) {
+      next();
+    }
+    return;
+  }
+
+  const bearerToken = extractBearerToken(req);
+  if (bearerToken) {
+    if (verifyAndAttachAuth(bearerToken, req, res)) {
+      next();
+    }
+    return;
+  }
+
+  res.status(401).json({ message: "Unauthorized" });
 }
 
 export function requireServiceProvider(
