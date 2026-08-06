@@ -2368,4 +2368,310 @@
  *       properties:
  *         listing:
  *           $ref: '#/components/schemas/AdminListingDetail'
+ *
+ *     DispatchStatus:
+ *       type: string
+ *       enum:
+ *         - searching
+ *         - offered
+ *         - accepted
+ *         - en_route
+ *         - arrived
+ *         - cancelled
+ *         - expired
+ *         - no_provider
+ *
+ *     DispatchPickup:
+ *       type: object
+ *       required: [lat, lng, address]
+ *       properties:
+ *         lat:
+ *           type: number
+ *         lng:
+ *           type: number
+ *         address:
+ *           type: string
+ *           nullable: true
+ *       example:
+ *         lat: 6.5244
+ *         lng: 3.3792
+ *         address: "12 Admiralty Way, Lekki, Lagos"
+ *
+ *     DispatchAssignedService:
+ *       type: object
+ *       required: [id, title, providerName]
+ *       properties:
+ *         id:
+ *           type: string
+ *         title:
+ *           type: string
+ *         providerName:
+ *           type: string
+ *       example:
+ *         id: "507f1f77bcf86cd799439012"
+ *         title: "BLS Ground Ambulance"
+ *         providerName: "Acme Ambulance Services"
+ *
+ *     DispatchAmbulanceLocation:
+ *       type: object
+ *       required: [lat, lng, updatedAt]
+ *       properties:
+ *         lat:
+ *           type: number
+ *         lng:
+ *           type: number
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *       example:
+ *         lat: 6.52
+ *         lng: 3.38
+ *         updatedAt: "2026-08-06T12:00:00.000Z"
+ *
+ *     DispatchRoute:
+ *       type: object
+ *       required: [polyline, distanceMeters, durationSeconds]
+ *       properties:
+ *         polyline:
+ *           type: string
+ *           description: Google encoded polyline — decode on the client map
+ *         distanceMeters:
+ *           type: number
+ *         durationSeconds:
+ *           type: number
+ *       example:
+ *         polyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
+ *         distanceMeters: 4200
+ *         durationSeconds: 780
+ *
+ *     DispatchRequest:
+ *       type: object
+ *       required: [id, status, pickup, clientNotes, attempts, createdAt]
+ *       properties:
+ *         id:
+ *           type: string
+ *         status:
+ *           $ref: '#/components/schemas/DispatchStatus'
+ *         pickup:
+ *           $ref: '#/components/schemas/DispatchPickup'
+ *         clientNotes:
+ *           type: string
+ *           nullable: true
+ *         assignedService:
+ *           $ref: '#/components/schemas/DispatchAssignedService'
+ *         offerExpiresAt:
+ *           type: string
+ *           format: date-time
+ *           description: Present when status is offered (4-minute accept window)
+ *         ambulanceLocation:
+ *           $ref: '#/components/schemas/DispatchAmbulanceLocation'
+ *         route:
+ *           $ref: '#/components/schemas/DispatchRoute'
+ *         attempts:
+ *           type: integer
+ *           description: Number of provider offer attempts so far
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         acceptedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         arrivedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *       example:
+ *         id: "507f1f77bcf86cd799439060"
+ *         status: offered
+ *         pickup:
+ *           lat: 6.5244
+ *           lng: 3.3792
+ *           address: "12 Admiralty Way, Lekki, Lagos"
+ *         clientNotes: "Patient conscious, chest pain"
+ *         assignedService:
+ *           id: "507f1f77bcf86cd799439012"
+ *           title: "BLS Ground Ambulance"
+ *           providerName: "Acme Ambulance Services"
+ *         offerExpiresAt: "2026-08-06T12:04:00.000Z"
+ *         attempts: 1
+ *         createdAt: "2026-08-06T12:00:00.000Z"
+ *         acceptedAt: null
+ *         arrivedAt: null
+ *
+ *     DispatchRequestResponse:
+ *       type: object
+ *       required: [request]
+ *       properties:
+ *         request:
+ *           $ref: '#/components/schemas/DispatchRequest'
+ *
+ *     DispatchActiveRequestResponse:
+ *       type: object
+ *       required: [request]
+ *       properties:
+ *         request:
+ *           allOf:
+ *             - $ref: '#/components/schemas/DispatchRequest'
+ *           nullable: true
+ *       example:
+ *         request: null
+ *
+ *     DispatchRequestListResponse:
+ *       type: object
+ *       required: [requests]
+ *       properties:
+ *         requests:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/DispatchRequest'
+ *
+ *     DispatchOfferResponse:
+ *       type: object
+ *       required: [offer]
+ *       properties:
+ *         offer:
+ *           allOf:
+ *             - $ref: '#/components/schemas/DispatchRequest'
+ *           nullable: true
+ *       example:
+ *         offer: null
+ *
+ *     DispatchRouteResponse:
+ *       type: object
+ *       required: [route]
+ *       properties:
+ *         route:
+ *           $ref: '#/components/schemas/DispatchRoute'
+ *
+ *     DispatchCreateRequestCurrentLocation:
+ *       type: object
+ *       required: [locationSource, latitude, longitude]
+ *       properties:
+ *         locationSource:
+ *           type: string
+ *           enum: [current_location]
+ *         latitude:
+ *           type: number
+ *           minimum: -90
+ *           maximum: 90
+ *         longitude:
+ *           type: number
+ *           minimum: -180
+ *           maximum: 180
+ *         notes:
+ *           type: string
+ *           maxLength: 1000
+ *       example:
+ *         locationSource: current_location
+ *         latitude: 6.5244
+ *         longitude: 3.3792
+ *         notes: "Patient conscious, chest pain"
+ *
+ *     DispatchCreateRequestAddress:
+ *       type: object
+ *       required: [locationSource, address]
+ *       properties:
+ *         locationSource:
+ *           type: string
+ *           enum: [address]
+ *         address:
+ *           type: string
+ *         notes:
+ *           type: string
+ *           maxLength: 1000
+ *       example:
+ *         locationSource: address
+ *         address: "12 Admiralty Way, Lekki, Lagos"
+ *         notes: "Gate 2, blue building"
+ *
+ *     DispatchConflictResponse:
+ *       type: object
+ *       required: [message, requestId]
+ *       properties:
+ *         message:
+ *           type: string
+ *         requestId:
+ *           type: string
+ *       example:
+ *         message: "You already have an active dispatch request"
+ *         requestId: "507f1f77bcf86cd799439060"
+ *
+ *     DispatchServiceListing:
+ *       type: object
+ *       required: [id, title, dispatchEnabled, liveLocationUpdatedAt]
+ *       properties:
+ *         id:
+ *           type: string
+ *         title:
+ *           type: string
+ *         dispatchEnabled:
+ *           type: boolean
+ *         liveLocationUpdatedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *       example:
+ *         id: "507f1f77bcf86cd799439012"
+ *         title: "BLS Ground Ambulance"
+ *         dispatchEnabled: true
+ *         liveLocationUpdatedAt: "2026-08-06T12:00:00.000Z"
+ *
+ *     DispatchServiceListResponse:
+ *       type: object
+ *       required: [services]
+ *       properties:
+ *         services:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/DispatchServiceListing'
+ *
+ *     DispatchStatusUpdateResponse:
+ *       type: object
+ *       required: [serviceId, dispatchEnabled]
+ *       properties:
+ *         serviceId:
+ *           type: string
+ *         dispatchEnabled:
+ *           type: boolean
+ *       example:
+ *         serviceId: "507f1f77bcf86cd799439012"
+ *         dispatchEnabled: true
+ *
+ *     DispatchStatusPatchRequest:
+ *       type: object
+ *       required: [dispatchEnabled]
+ *       properties:
+ *         dispatchEnabled:
+ *           type: boolean
+ *         latitude:
+ *           type: number
+ *           minimum: -90
+ *           maximum: 90
+ *           description: Required when enabling dispatch unless a fresh live location already exists (within 5 minutes)
+ *         longitude:
+ *           type: number
+ *           minimum: -180
+ *           maximum: 180
+ *           description: Required when enabling dispatch unless a fresh live location already exists (within 5 minutes)
+ *       example:
+ *         dispatchEnabled: true
+ *         latitude: 9.0765
+ *         longitude: 7.3986
+ *
+ *     DispatchLocationPatchRequest:
+ *       type: object
+ *       required: [latitude, longitude]
+ *       properties:
+ *         latitude:
+ *           type: number
+ *           minimum: -90
+ *           maximum: 90
+ *         longitude:
+ *           type: number
+ *           minimum: -180
+ *           maximum: 180
+ *       example:
+ *         latitude: 6.5244
+ *         longitude: 3.3792
  */
