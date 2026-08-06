@@ -255,9 +255,84 @@ export const NotificationTemplates = {
       "request_accepted",
       "Ambulance request accepted",
       "Your ambulance request has been accepted.",
-      `/client/orders`,
+      `/client/dispatch/${encodeURIComponent(input.requestId)}`,
       {
         entityId: input.requestId,
+        data: { requestId: input.requestId },
+      },
+    );
+  },
+
+  ambulanceRequest(input: {
+    requestId: string;
+    pickupAddress: string | null;
+    distanceKm: number;
+  }): NotificationTemplateResult {
+    const locationLabel = input.pickupAddress?.trim() || "the pickup location";
+    return baseTemplate(
+      "ambulance_request",
+      "New ambulance request",
+      `New request near ${locationLabel} (${input.distanceKm.toFixed(1)} km away). Respond within 4 minutes.`,
+      "/provider/dispatch/requests",
+      {
+        entityId: input.requestId,
+        serviceId: undefined,
+        data: { requestId: input.requestId },
+      },
+    );
+  },
+
+  ambulanceEnRoute(input: { requestId: string }): NotificationTemplateResult {
+    return baseTemplate(
+      "ambulance_en_route",
+      "Ambulance en route",
+      "Your ambulance is on the way to your location.",
+      `/client/dispatch/${encodeURIComponent(input.requestId)}`,
+      {
+        entityId: input.requestId,
+        data: { requestId: input.requestId },
+      },
+    );
+  },
+
+  ambulanceArrived(input: { requestId: string }): NotificationTemplateResult {
+    return baseTemplate(
+      "ambulance_arrived",
+      "Ambulance arrived",
+      "Your ambulance has arrived at the pickup location.",
+      `/client/dispatch/${encodeURIComponent(input.requestId)}`,
+      {
+        entityId: input.requestId,
+        data: { requestId: input.requestId },
+      },
+    );
+  },
+
+  noAmbulanceAvailable(input: { requestId: string }): NotificationTemplateResult {
+    return baseTemplate(
+      "general",
+      "No ambulance available",
+      "We could not find an available ambulance nearby. Please try again or contact emergency services if this is urgent.",
+      "/client/dispatch",
+      {
+        entityId: input.requestId,
+        category: "ambulance_updates",
+        priority: "high",
+        data: { requestId: input.requestId },
+      },
+    );
+  },
+
+  dispatchCancelled(input: { requestId: string }): NotificationTemplateResult {
+    return baseTemplate(
+      "general",
+      "Dispatch request cancelled",
+      "The client cancelled their ambulance request.",
+      "/provider/dispatch/requests",
+      {
+        entityId: input.requestId,
+        category: "ambulance_updates",
+        priority: "normal",
         data: { requestId: input.requestId },
       },
     );

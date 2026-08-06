@@ -12,6 +12,7 @@ import { setupMiddleware } from "./shared/middlewares/middleware";
 import { logger } from "./shared/lib/logger";
 import { migrateDualCurrencyWallets } from "./modules/wallet/migrateDualWallets";
 import { processDueNotificationSchedules } from "./modules/notifications/notifications.service";
+import { processDispatchOfferExpiry } from "./modules/dispatch/dispatch-offer.worker";
 import { initFirebaseAdmin } from "./shared/firebase/firebase-admin";
 
 dotenv.config();
@@ -47,13 +48,22 @@ const startServer = async () => {
     await ensureServiceCategoryCatalogSeeded();
     await migrateDualCurrencyWallets();
     const NOTIFICATION_POLL_MS = 60_000;
+    const DISPATCH_OFFER_POLL_MS = 30_000;
     setInterval(() => {
       void processDueNotificationSchedules().catch((error) => {
         logger.error("Notification schedule worker failed", { error });
       });
     }, NOTIFICATION_POLL_MS);
+    setInterval(() => {
+      void processDispatchOfferExpiry().catch((error) => {
+        logger.error("Dispatch offer worker failed", { error });
+      });
+    }, DISPATCH_OFFER_POLL_MS);
     void processDueNotificationSchedules().catch((error) => {
       logger.error("Initial notification schedule run failed", { error });
+    });
+    void processDispatchOfferExpiry().catch((error) => {
+      logger.error("Initial dispatch offer run failed", { error });
     });
 
     app.listen(PORT, () => {

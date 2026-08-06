@@ -97,6 +97,21 @@ const serviceSchema = new mongoose.Schema(
     bookingWindow: { type: hireReturnWindowSchema, default: null },
     hourlyBookingSchedule: { type: hourlyBookingScheduleSchema, default: null },
     bookingGapMinutes: { type: Number, default: null, min: 0 },
+    /** When true, listing is on duty for live ambulance dispatch (ground-ambulance only). */
+    dispatchEnabled: { type: Boolean, default: false },
+    /** Current ambulance GPS for dispatch matching. */
+    liveLocation: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number],
+        default: undefined,
+      },
+    },
+    liveLocationUpdatedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -120,7 +135,36 @@ serviceSchema.pre("validate", function () {
   }
 });
 
+serviceSchema.pre("save", function () {
+  const loc = this.get("liveLocation") as
+    | { coordinates?: number[] | null }
+    | null
+    | undefined;
+  if (loc && !hasValidServiceLiveLocation(loc)) {
+    this.set("liveLocation", undefined);
+    this.markModified("liveLocation");
+  }
+});
+
+function hasValidServiceLiveLocation(location: {
+  coordinates?: number[] | null;
+}): boolean {
+  const coords = location.coordinates;
+  return (
+    Array.isArray(coords) &&
+    coords.length === 2 &&
+    Number.isFinite(coords[0]) &&
+    Number.isFinite(coords[1])
+  );
+}
+
 serviceSchema.index({ userId: 1, createdAt: -1 });
+serviceSchema.index({ liveLocation: "2dsphere" });
+serviceSchema.index({
+  departmentSlug: 1,
+  dispatchEnabled: 1,
+  isAvailable: 1,
+});
 
 export type ServiceDocument =
   mongoose.InferSchemaType<typeof serviceSchema> & mongoose.Document;

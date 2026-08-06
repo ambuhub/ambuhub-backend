@@ -135,3 +135,19 @@ export function requireServiceProviderOrAdmin(
   }
   next();
 }
+
+export function requireClient(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.auth) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (req.auth.role !== "client") {
+    res.status(403).json({ message: "Forbidden" });
+    return;
+  }
+  next();
+}
