@@ -2,24 +2,27 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { User, type UserRole } from "../../models/user.model";
+import { Otp } from "../../models/otp.model";
 import { ServiceProvider } from "../../models/serviceProvider.model";
 import { ensureWallet } from "../wallet/wallet.service";
 import { logger } from "../../shared/lib/logger";
 import { normalizeCountryCode } from "../../shared/lib/countryCode";
 import { isMarketplaceCountry } from "../../shared/currency/countryCurrency";
+import { AuthHttpError } from "./auth.errors";
+import {
+  getVerifyEmailOtpStatus,
+  issueOtp,
+  verifyEmailOtp,
+  verifyOtpForPurpose,
+  verifyOtpForUserPurpose,
+  type IssueOtpResult,
+} from "./otp.service";
+
+export { AuthHttpError } from "./auth.errors";
+export { getVerifyEmailOtpStatus };
 
 const SALT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
-
-export class AuthHttpError extends Error {
-  constructor(
-    public statusCode: number,
-    message: string
-  ) {
-    super(message);
-    this.name = "AuthHttpError";
-  }
-}
 
 export interface RegisterInput {
   firstName: string;
@@ -53,24 +56,29 @@ function requireEnvJwtSecret(): string {
 }
 
 /**
- * Reserved for OTP email verification (nodemailer + stored OTP + expiry).
- * Call after successful registration once the flow is implemented.
+ * Create and email a verify_email OTP (15-minute expiry).
  */
 export async function scheduleEmailVerificationOtp(
   userId: string,
-  email: string
-): Promise<void> {
-  logger.info("OTP email verification scheduled (not implemented yet)", {
+  email: string,
+): Promise<IssueOtpResult> {
+  return issueOtp({
     userId,
     email,
+    purpose: "verify_email",
+    force: true,
   });
 }
 
-function signToken(userId: string, role: UserRole): string {
+function signToken(
+  userId: string,
+  role: UserRole,
+  emailVerified: boolean,
+): string {
   return jwt.sign(
-    { sub: userId, userId, role },
+    { sub: userId, userId, role, emailVerified },
     requireEnvJwtSecret(),
-    { expiresIn: JWT_EXPIRES }
+    { expiresIn: JWT_EXPIRES },
   );
 }
 
@@ -180,8 +188,13 @@ function parseClientDateOfBirth(raw: string): Date {
 }
 
 export async function register(
-  input: RegisterInput
-): Promise<{ token: string; user: PublicAuthUser }> {
+  input: RegisterInput,
+): Promise<{
+  token: string;
+  user: PublicAuthUser;
+  requiresEmailVerification: true;
+  otp: IssueOtpResult;
+}> {
   const {
     firstName,
     lastName,
@@ -310,13 +323,18 @@ export async function register(
     };
   }
 
-  await scheduleEmailVerificationOtp(user._id.toString(), user.email);
+  const otpMeta = await scheduleEmailVerificationOtp(
+    user._id.toString(),
+    user.email,
+  );
 
-  const token = signToken(user._id.toString(), user.role);
+  const token = signToken(user._id.toString(), user.role, false);
 
   return {
     token,
     user: toPublicUser(user, providerForResponse),
+    requiresEmailVerification: true,
+    otp: otpMeta,
   };
 }
 
@@ -357,8 +375,13 @@ export async function getSessionUser(userId: string): Promise<PublicAuthUser | n
 }
 
 export async function login(
-  input: LoginInput
-): Promise<{ token: string; user: PublicAuthUser }> {
+  input: LoginInput,
+): Promise<{
+  token: string;
+  user: PublicAuthUser;
+  requiresEmailVerification?: boolean;
+  otp?: IssueOtpResult;
+}> {
   const { email, password } = input;
   if (!email?.trim() || !password) {
     throw new AuthHttpError(400, "Email and password are required");
@@ -403,7 +426,21 @@ export async function login(
     }
   }
 
-  const token = signToken(user._id.toString(), user.role);
+  if (!user.emailVerified) {
+    const otp = await scheduleEmailVerificationOtp(
+      user._id.toString(),
+      user.email,
+    );
+    const token = signToken(user._id.toString(), user.role, false);
+    return {
+      token,
+      user: toPublicUser(user, providerForResponse),
+      requiresEmailVerification: true,
+      otp,
+    };
+  }
+
+  const token = signToken(user._id.toString(), user.role, true);
 
   return {
     token,
@@ -436,7 +473,7 @@ export async function adminLogin(
     throw new AuthHttpError(403, "This account has been suspended.");
   }
 
-  const token = signToken(user._id.toString(), user.role);
+  const token = signToken(user._id.toString(), user.role, true);
 
   return {
     token,
@@ -449,46 +486,134 @@ export interface ResetPasswordUnverifiedInput {
   newPassword: string;
 }
 
-/**
- * Sets a new password from the account email only (no OTP or email link).
- * Replace with email-based reset when outbound mail is available.
- * Set DISABLE_UNVERIFIED_PASSWORD_RESET=true to turn this off (recommended once email reset ships).
- */
-export async function resetPasswordWithoutVerification(
-  input: ResetPasswordUnverifiedInput,
-): Promise<void> {
-  if (process.env.DISABLE_UNVERIFIED_PASSWORD_RESET === "true") {
-    throw new AuthHttpError(
-      403,
-      "Password reset without email is disabled on this server.",
-    );
-  }
+const PASSWORD_RESET_TOKEN_PURPOSE = "password_reset";
+const PASSWORD_RESET_TOKEN_EXPIRES = "15m";
 
+const FORGOT_PASSWORD_GENERIC_MESSAGE =
+  "If an account exists for that email, we sent a verification code.";
+
+export async function requestPasswordResetOtp(input: {
+  email: string;
+  force?: boolean;
+}): Promise<{
+  ok: true;
+  message: string;
+  resendAvailableAt: string;
+  resendCooldownAfterSeconds: number;
+}> {
   const email = input.email?.trim().toLowerCase() ?? "";
-  const newPassword = input.newPassword ?? "";
-
   if (!email) {
     throw new AuthHttpError(400, "Email is required");
   }
+
+  const fallbackAvailableAt = new Date(
+    Date.now() + 90_000,
+  ).toISOString();
+
+  const user = await User.findOne({ email }).select("_id email role").lean();
+  if (!user || user.role === "admin") {
+    return {
+      ok: true,
+      message: FORGOT_PASSWORD_GENERIC_MESSAGE,
+      resendAvailableAt: fallbackAvailableAt,
+      resendCooldownAfterSeconds: 90,
+    };
+  }
+
+  try {
+    const otp = await issueOtp({
+      userId: user._id.toString(),
+      email: user.email,
+      purpose: "reset_password",
+      force: input.force ?? false,
+    });
+    return {
+      ok: true,
+      message: FORGOT_PASSWORD_GENERIC_MESSAGE,
+      resendAvailableAt: otp.resendAvailableAt,
+      resendCooldownAfterSeconds: otp.resendCooldownAfterSeconds,
+    };
+  } catch (err) {
+    if (err instanceof AuthHttpError && err.statusCode === 429) {
+      throw err;
+    }
+    if (err instanceof AuthHttpError && err.statusCode === 503) {
+      throw err;
+    }
+    throw err;
+  }
+}
+
+export async function verifyPasswordResetOtp(input: {
+  email: string;
+  code: string;
+}): Promise<{ resetToken: string; email: string }> {
+  const { userId, email } = await verifyOtpForPurpose({
+    email: input.email,
+    code: input.code,
+    purpose: "reset_password",
+  });
+
+  const resetToken = jwt.sign(
+    {
+      purpose: PASSWORD_RESET_TOKEN_PURPOSE,
+      sub: userId,
+      userId,
+      email,
+    },
+    requireEnvJwtSecret(),
+    { expiresIn: PASSWORD_RESET_TOKEN_EXPIRES },
+  );
+
+  return { resetToken, email };
+}
+
+export async function resetPasswordWithToken(input: {
+  resetToken: string;
+  newPassword: string;
+}): Promise<{ ok: true; message: string }> {
+  const newPassword = input.newPassword ?? "";
   if (!newPassword || newPassword.length < 8) {
     throw new AuthHttpError(400, "Password must be at least 8 characters");
   }
 
-  const existing = await User.findOne({ email }).select("role").lean();
-  if (!existing || existing.role === "admin") {
-    logger.info("Unverified password reset skipped", {
-      reason: !existing ? "unknown_email" : "admin_account",
-    });
-    return;
+  let payload: jwt.JwtPayload;
+  try {
+    payload = jwt.verify(
+      input.resetToken?.trim() ?? "",
+      requireEnvJwtSecret(),
+    ) as jwt.JwtPayload;
+  } catch {
+    throw new AuthHttpError(
+      400,
+      "Reset session expired. Please verify your email again.",
+    );
   }
 
-  const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-  const result = await User.updateOne({ email }, { $set: { password: hash } });
+  if (payload.purpose !== PASSWORD_RESET_TOKEN_PURPOSE) {
+    throw new AuthHttpError(400, "Invalid reset session");
+  }
 
-  logger.info("Unverified password reset processed", {
-    matchedCount: result.matchedCount,
-    modifiedCount: result.modifiedCount,
-  });
+  const userId = String(payload.sub ?? payload.userId ?? "");
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new AuthHttpError(400, "Invalid reset session");
+  }
+
+  const user = await User.findById(userId).select("+password role emailVerified");
+  if (!user || user.role === "admin") {
+    throw new AuthHttpError(400, "Invalid reset session");
+  }
+
+  user.password = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  user.emailVerified = true;
+  await user.save();
+
+  logger.info("Password reset completed via OTP", { userId });
+
+  return {
+    ok: true,
+    message: "Password updated successfully. You can sign in with your new password.",
+  };
 }
 
 export interface UpdateClientProfileInput {
@@ -679,4 +804,194 @@ export async function changePassword(
 
   user.password = await bcrypt.hash(newPassword, SALT_ROUNDS);
   await user.save();
+}
+
+export async function verifyEmailAndIssueSession(
+  userId: string,
+  code: string,
+): Promise<{ token: string; user: PublicAuthUser }> {
+  await verifyEmailOtp({ userId, code });
+  const user = await getSessionUser(userId);
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+  const token = signToken(user.id, user.role, true);
+  return { token, user };
+}
+
+export async function resendVerifyEmailOtp(
+  userId: string,
+): Promise<IssueOtpResult> {
+  const user = await User.findById(userId).select("email emailVerified role");
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+  if (user.role === "admin") {
+    throw new AuthHttpError(400, "Admin accounts do not require email verification");
+  }
+  if (user.emailVerified) {
+    throw new AuthHttpError(400, "Email is already verified");
+  }
+  return issueOtp({
+    userId: user._id.toString(),
+    email: user.email,
+    purpose: "verify_email",
+  });
+}
+
+export async function requestChangeEmailOtp(input: {
+  userId: string;
+  newEmail: string;
+  password: string;
+  force?: boolean;
+}): Promise<IssueOtpResult & { pendingEmail: string }> {
+  const newEmail = input.newEmail?.trim().toLowerCase() ?? "";
+  const password = input.password ?? "";
+  if (!newEmail) {
+    throw new AuthHttpError(400, "New email is required");
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+    throw new AuthHttpError(400, "Invalid email address");
+  }
+  if (!password) {
+    throw new AuthHttpError(400, "Password is required to change your email");
+  }
+
+  const user = await User.findById(input.userId).select("email role +password");
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+  if (user.role === "admin") {
+    throw new AuthHttpError(400, "Admin accounts cannot change email here");
+  }
+
+  const match = await bcrypt.compare(password, user.password);
+  if (!match) {
+    throw new AuthHttpError(401, "Password is incorrect");
+  }
+
+  if (user.email === newEmail) {
+    throw new AuthHttpError(400, "That is already your current email address");
+  }
+
+  const taken = await User.findOne({ email: newEmail }).select("_id").lean();
+  if (taken) {
+    throw new AuthHttpError(409, "An account with this email already exists");
+  }
+
+  const otp = await issueOtp({
+    userId: user._id.toString(),
+    email: newEmail,
+    purpose: "change_email",
+    force: input.force ?? false,
+  });
+
+  return { ...otp, pendingEmail: newEmail };
+}
+
+export async function verifyChangeEmailAndIssueSession(input: {
+  userId: string;
+  code: string;
+}): Promise<{ token: string; user: PublicAuthUser }> {
+  const code = (input.code ?? "").replace(/\D/g, "").slice(0, 6);
+  if (code.length !== 6) {
+    throw new AuthHttpError(400, "Enter the 6-digit verification code");
+  }
+
+  const user = await User.findById(input.userId);
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+  if (user.role === "admin") {
+    throw new AuthHttpError(400, "Admin accounts cannot change email here");
+  }
+
+  const verified = await verifyOtpForUserPurpose({
+    userId: user._id.toString(),
+    code,
+    purpose: "change_email",
+  });
+
+  const taken = await User.findOne({
+    email: verified.email,
+    _id: { $ne: user._id },
+  })
+    .select("_id")
+    .lean();
+  if (taken) {
+    throw new AuthHttpError(409, "An account with this email already exists");
+  }
+
+  user.email = verified.email;
+  user.emailVerified = true;
+  try {
+    await user.save();
+  } catch (err: unknown) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: number }).code === 11000
+    ) {
+      throw new AuthHttpError(409, "An account with this email already exists");
+    }
+    throw err;
+  }
+
+  const sessionUser = await getSessionUser(user._id.toString());
+  if (!sessionUser) {
+    throw new AuthHttpError(500, "Could not load updated profile");
+  }
+  const token = signToken(sessionUser.id, sessionUser.role, true);
+  return { token, user: sessionUser };
+}
+
+export async function resendChangeEmailOtp(
+  userId: string,
+): Promise<IssueOtpResult & { pendingEmail: string }> {
+  const user = await User.findById(userId).select("email role");
+  if (!user) {
+    throw new AuthHttpError(404, "User not found");
+  }
+  if (user.role === "admin") {
+    throw new AuthHttpError(400, "Admin accounts cannot change email here");
+  }
+
+  const latest = await Otp.findOne({
+    userId: user._id,
+    purpose: "change_email",
+    consumedAt: null,
+    expiresAt: { $gt: new Date() },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  if (!latest?.email) {
+    throw new AuthHttpError(
+      400,
+      "No pending email change. Enter a new email address first.",
+    );
+  }
+
+  if (latest.email === user.email) {
+    throw new AuthHttpError(400, "That is already your current email address");
+  }
+
+  const taken = await User.findOne({
+    email: latest.email,
+    _id: { $ne: user._id },
+  })
+    .select("_id")
+    .lean();
+  if (taken) {
+    throw new AuthHttpError(409, "An account with this email already exists");
+  }
+
+  const otp = await issueOtp({
+    userId: user._id.toString(),
+    email: latest.email,
+    purpose: "change_email",
+  });
+
+  return { ...otp, pendingEmail: latest.email };
 }

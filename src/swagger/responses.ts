@@ -6,9 +6,13 @@
  *       type: object
  *       required: [user]
  *       properties:
+ *         token:
+ *           type: string
+ *           description: JWT for mobile `Authorization: Bearer` (also set as httpOnly cookie for web)
  *         user:
  *           $ref: '#/components/schemas/PublicUser'
  *       example:
+ *         token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *         user:
  *           id: "507f1f77bcf86cd799439011"
  *           firstName: "Jane"
@@ -20,6 +24,153 @@
  *           phone: "+2348000000000"
  *           countryCode: "NG"
  *
+ *     OtpIssueMeta:
+ *       type: object
+ *       required:
+ *         - email
+ *         - purpose
+ *         - expiresAt
+ *         - resendAvailableAt
+ *         - resendCooldownAfterSeconds
+ *       properties:
+ *         email:
+ *           type: string
+ *           format: email
+ *           description: Address the OTP was sent to
+ *         purpose:
+ *           type: string
+ *           enum: [verify_email, reset_password, change_email]
+ *         expiresAt:
+ *           type: string
+ *           format: date-time
+ *         resendAvailableAt:
+ *           type: string
+ *           format: date-time
+ *         resendCooldownAfterSeconds:
+ *           type: integer
+ *           description: Seconds until another code may be requested (typically 90)
+ *         pendingEmail:
+ *           type: string
+ *           format: email
+ *           description: Present on change-email responses; same as the new address
+ *       example:
+ *         email: "jane@example.com"
+ *         purpose: "verify_email"
+ *         expiresAt: "2026-08-08T21:15:00.000Z"
+ *         resendAvailableAt: "2026-08-08T21:01:30.000Z"
+ *         resendCooldownAfterSeconds: 90
+ *
+ *     AuthSessionWithOtpResponse:
+ *       type: object
+ *       required: [user]
+ *       description: |
+ *         Returned by register and client/provider login. When `requiresEmailVerification`
+ *         is true, complete `POST /api/auth/verify-email` before using dashboards.
+ *       properties:
+ *         token:
+ *           type: string
+ *           description: JWT for mobile `Authorization: Bearer` (also set as httpOnly cookie for web)
+ *         user:
+ *           $ref: '#/components/schemas/PublicUser'
+ *         requiresEmailVerification:
+ *           type: boolean
+ *           description: True when the account must still verify email via OTP
+ *         otp:
+ *           allOf:
+ *             - $ref: '#/components/schemas/OtpIssueMeta'
+ *           description: Present when a verification OTP was issued with this response
+ *       example:
+ *         token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *         user:
+ *           id: "507f1f77bcf86cd799439011"
+ *           firstName: "Jane"
+ *           lastName: "Doe"
+ *           email: "jane@example.com"
+ *           role: "client"
+ *           emailVerified: false
+ *           dateOfBirth: "1990-01-15"
+ *           phone: "+2348000000000"
+ *           countryCode: "NG"
+ *         requiresEmailVerification: true
+ *         otp:
+ *           email: "jane@example.com"
+ *           purpose: "verify_email"
+ *           expiresAt: "2026-08-08T21:15:00.000Z"
+ *           resendAvailableAt: "2026-08-08T21:01:30.000Z"
+ *           resendCooldownAfterSeconds: 90
+ *
+ *     VerifyEmailStatusResponse:
+ *       type: object
+ *       required:
+ *         - email
+ *         - emailVerified
+ *         - role
+ *         - expiresAt
+ *         - resendAvailableAt
+ *         - resendCooldownAfterSeconds
+ *       properties:
+ *         email:
+ *           type: string
+ *           format: email
+ *         emailVerified:
+ *           type: boolean
+ *         role:
+ *           type: string
+ *           enum: [client, service_provider, admin, patient]
+ *         expiresAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiry of the active verify_email OTP, if any
+ *         resendAvailableAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         resendCooldownAfterSeconds:
+ *           type: integer
+ *       example:
+ *         email: "jane@example.com"
+ *         emailVerified: false
+ *         role: "client"
+ *         expiresAt: "2026-08-08T21:15:00.000Z"
+ *         resendAvailableAt: "2026-08-08T21:01:30.000Z"
+ *         resendCooldownAfterSeconds: 45
+ *
+ *     OtpEnvelopeResponse:
+ *       type: object
+ *       required: [otp]
+ *       properties:
+ *         otp:
+ *           $ref: '#/components/schemas/OtpIssueMeta'
+ *       example:
+ *         otp:
+ *           email: "jane@example.com"
+ *           purpose: "verify_email"
+ *           expiresAt: "2026-08-08T21:15:00.000Z"
+ *           resendAvailableAt: "2026-08-08T21:01:30.000Z"
+ *           resendCooldownAfterSeconds: 90
+ *
+ *     ChangeEmailOtpResponse:
+ *       type: object
+ *       required: [ok, message, otp]
+ *       properties:
+ *         ok:
+ *           type: boolean
+ *         message:
+ *           type: string
+ *         otp:
+ *           $ref: '#/components/schemas/OtpIssueMeta'
+ *       example:
+ *         ok: true
+ *         message: "Verification code sent to your new email address"
+ *         otp:
+ *           email: "new.user@example.com"
+ *           pendingEmail: "new.user@example.com"
+ *           purpose: "change_email"
+ *           expiresAt: "2026-08-08T21:15:00.000Z"
+ *           resendAvailableAt: "2026-08-08T21:01:30.000Z"
+ *           resendCooldownAfterSeconds: 90
+ *
  *     ForgotPasswordResponse:
  *       type: object
  *       required: [ok, message]
@@ -28,9 +179,30 @@
  *           type: boolean
  *         message:
  *           type: string
+ *         resendAvailableAt:
+ *           type: string
+ *           format: date-time
+ *         resendCooldownAfterSeconds:
+ *           type: integer
  *       example:
  *         ok: true
- *         message: "If an account exists for that email, the password has been updated. You can sign in with the new password."
+ *         message: "If an account exists for that email, we sent a verification code."
+ *         resendAvailableAt: "2026-08-08T21:00:00.000Z"
+ *         resendCooldownAfterSeconds: 90
+ *
+ *     ForgotPasswordVerifyResponse:
+ *       type: object
+ *       required: [resetToken, email]
+ *       properties:
+ *         resetToken:
+ *           type: string
+ *           description: Pass this to `POST /api/auth/forgot-password/reset`
+ *         email:
+ *           type: string
+ *           format: email
+ *       example:
+ *         resetToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *         email: "jane@example.com"
  *
  *     OkMessageResponse:
  *       type: object

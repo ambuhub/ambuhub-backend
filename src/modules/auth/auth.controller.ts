@@ -5,11 +5,19 @@ import {
   adminLogin,
   changePassword,
   getSessionUser,
+  getVerifyEmailOtpStatus,
   login,
   register,
-  resetPasswordWithoutVerification,
+  requestChangeEmailOtp,
+  requestPasswordResetOtp,
+  resendChangeEmailOtp,
+  resendVerifyEmailOtp,
+  resetPasswordWithToken,
   updateClientProfile,
   updateProviderProfile,
+  verifyChangeEmailAndIssueSession,
+  verifyEmailAndIssueSession,
+  verifyPasswordResetOtp,
 } from "./auth.service";
 import { logger } from "../../shared/lib/logger";
 
@@ -20,7 +28,12 @@ export async function registerHandler(
   try {
     const result = await register(req.body);
     setAuthCookie(res, result.token);
-    res.status(201).json({ user: result.user });
+    res.status(201).json({
+      token: result.token,
+      user: result.user,
+      requiresEmailVerification: result.requiresEmailVerification ?? false,
+      otp: result.otp,
+    });
   } catch (err) {
     if (err instanceof AuthHttpError) {
       res.status(err.statusCode).json({ message: err.message });
@@ -35,7 +48,12 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
   try {
     const result = await login(req.body);
     setAuthCookie(res, result.token);
-    res.status(200).json({ user: result.user });
+    res.status(200).json({
+      token: result.token,
+      user: result.user,
+      requiresEmailVerification: result.requiresEmailVerification ?? false,
+      otp: result.otp,
+    });
   } catch (err) {
     if (err instanceof AuthHttpError) {
       res.status(err.statusCode).json({ message: err.message });
@@ -53,7 +71,7 @@ export async function adminLoginHandler(
   try {
     const result = await adminLogin(req.body);
     setAuthCookie(res, result.token);
-    res.status(200).json({ user: result.user });
+    res.status(200).json({ token: result.token, user: result.user });
   } catch (err) {
     if (err instanceof AuthHttpError) {
       res.status(err.statusCode).json({ message: err.message });
@@ -75,21 +93,81 @@ export async function forgotPasswordHandler(
 ): Promise<void> {
   try {
     const body = req.body as Record<string, unknown>;
-    await resetPasswordWithoutVerification({
-      email: String(body.email ?? ""),
-      newPassword: String(body.newPassword ?? ""),
+    const result = await requestPasswordResetOtp({
+      email: typeof body.email === "string" ? body.email : "",
+      force: true,
     });
-    res.status(200).json({
-      ok: true,
-      message:
-        "If an account exists for that email, the password has been updated. You can sign in with the new password.",
-    });
+    res.status(200).json(result);
   } catch (err) {
     if (err instanceof AuthHttpError) {
       res.status(err.statusCode).json({ message: err.message });
       return;
     }
-    logger.error("forgot password failed", { error: err });
+    logger.error("forgot password request failed", { error: err });
+    res.status(500).json({ message: "Could not start password reset" });
+  }
+}
+
+export async function forgotPasswordResendHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const result = await requestPasswordResetOtp({
+      email: typeof body.email === "string" ? body.email : "",
+      force: false,
+    });
+    res.status(200).json(result);
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("forgot password resend failed", { error: err });
+    res.status(500).json({ message: "Could not resend verification code" });
+  }
+}
+
+export async function forgotPasswordVerifyHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const result = await verifyPasswordResetOtp({
+      email: typeof body.email === "string" ? body.email : "",
+      code: typeof body.code === "string" ? body.code : "",
+    });
+    res.status(200).json(result);
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("forgot password verify failed", { error: err });
+    res.status(500).json({ message: "Could not verify code" });
+  }
+}
+
+export async function forgotPasswordResetHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const result = await resetPasswordWithToken({
+      resetToken: typeof body.resetToken === "string" ? body.resetToken : "",
+      newPassword:
+        typeof body.newPassword === "string" ? body.newPassword : "",
+    });
+    res.status(200).json(result);
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("forgot password reset failed", { error: err });
     res.status(500).json({ message: "Could not reset password" });
   }
 }
@@ -188,5 +266,151 @@ export async function changePasswordHandler(
     }
     logger.error("changePassword failed", { error: err });
     res.status(500).json({ message: "Could not change password" });
+  }
+}
+
+export async function getVerifyEmailStatusHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const status = await getVerifyEmailOtpStatus(req.auth.userId);
+    res.status(200).json(status);
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("get verify email status failed", { error: err });
+    res.status(500).json({ message: "Could not load verification status" });
+  }
+}
+
+export async function verifyEmailHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const code = typeof body.code === "string" ? body.code : "";
+    const result = await verifyEmailAndIssueSession(req.auth.userId, code);
+    setAuthCookie(res, result.token);
+    res.status(200).json({ token: result.token, user: result.user });
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("verify email failed", { error: err });
+    res.status(500).json({ message: "Could not verify email" });
+  }
+}
+
+export async function resendVerifyEmailHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const otp = await resendVerifyEmailOtp(req.auth.userId);
+    res.status(200).json({ otp });
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("resend verify email failed", { error: err });
+    res.status(500).json({ message: "Could not resend verification code" });
+  }
+}
+
+export async function requestChangeEmailHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const newEmail = typeof body.newEmail === "string" ? body.newEmail : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const otp = await requestChangeEmailOtp({
+      userId: req.auth.userId,
+      newEmail,
+      password,
+    });
+    res.status(200).json({
+      ok: true,
+      message: "Verification code sent to your new email address",
+      otp,
+    });
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("request change email failed", { error: err });
+    res.status(500).json({ message: "Could not start email change" });
+  }
+}
+
+export async function verifyChangeEmailHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const code = typeof body.code === "string" ? body.code : "";
+    const result = await verifyChangeEmailAndIssueSession({
+      userId: req.auth.userId,
+      code,
+    });
+    setAuthCookie(res, result.token);
+    res.status(200).json({ token: result.token, user: result.user });
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("verify change email failed", { error: err });
+    res.status(500).json({ message: "Could not verify new email" });
+  }
+}
+
+export async function resendChangeEmailHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const otp = await resendChangeEmailOtp(req.auth.userId);
+    res.status(200).json({ otp });
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("resend change email failed", { error: err });
+    res.status(500).json({ message: "Could not resend verification code" });
   }
 }

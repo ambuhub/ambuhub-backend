@@ -173,17 +173,79 @@
  *
  *     ForgotPasswordRequest:
  *       type: object
- *       required: [email, newPassword]
+ *       required: [email]
  *       properties:
  *         email:
  *           type: string
  *           format: email
+ *       example:
+ *         email: "jane@example.com"
+ *
+ *     ForgotPasswordVerifyRequest:
+ *       type: object
+ *       required: [email, code]
+ *       properties:
+ *         email:
+ *           type: string
+ *           format: email
+ *         code:
+ *           type: string
+ *           minLength: 6
+ *           maxLength: 6
+ *           example: "123456"
+ *
+ *     ForgotPasswordResetRequest:
+ *       type: object
+ *       required: [resetToken, newPassword]
+ *       properties:
+ *         resetToken:
+ *           type: string
+ *           description: Short-lived token returned by `POST /api/auth/forgot-password/verify`
  *         newPassword:
  *           type: string
  *           format: password
+ *           minLength: 8
  *       example:
- *         email: "jane@example.com"
+ *         resetToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *         newPassword: "NewSecurePass456!"
+ *
+ *     VerifyEmailRequest:
+ *       type: object
+ *       required: [code]
+ *       properties:
+ *         code:
+ *           type: string
+ *           minLength: 6
+ *           maxLength: 6
+ *           description: 6-digit OTP sent to the user's current email
+ *           example: "123456"
+ *
+ *     ChangeEmailRequest:
+ *       type: object
+ *       required: [newEmail, password]
+ *       properties:
+ *         newEmail:
+ *           type: string
+ *           format: email
+ *           description: Destination address that will receive the OTP
+ *         password:
+ *           type: string
+ *           format: password
+ *           description: Current account password (required to start a change)
+ *       example:
+ *         newEmail: "new.user@example.com"
+ *         password: "SecurePass123!"
+ *
+ *     ChangeEmailVerifyRequest:
+ *       type: object
+ *       required: [code]
+ *       properties:
+ *         code:
+ *           type: string
+ *           minLength: 6
+ *           maxLength: 6
+ *           description: 6-digit OTP sent to the pending new email
+ *           example: "123456"
  *
  *     CartItemInput:
  *       type: object
