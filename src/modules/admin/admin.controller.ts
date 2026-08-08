@@ -4,6 +4,7 @@ import { logger } from "../../shared/lib/logger";
 import {
   AdminHttpError,
   applyAdminUserAction,
+  createAdminUser,
   getAdminDashboardStats,
   getAdminOrderDetail,
   getAdminOrderReceipt,
@@ -13,6 +14,16 @@ import {
   listAdminUsers,
   type AdminUserAction,
 } from "./admin.service";
+import {
+  activityActionForUserAction,
+  listAdminActivityLogs,
+  recordAdminActivity,
+} from "./adminActivityLogs.service";
+import {
+  ADMIN_ACTIVITY_ACTION_LABELS,
+  adminActivityActionValues,
+  type AdminActivityAction,
+} from "../../models/adminActivityLog.model";
 import {
   getAdminConciergeRequestDetail,
   listAdminConciergeRequests,
@@ -143,6 +154,83 @@ export async function getAdminUsersHandler(
   }
 }
 
+export async function postAdminTeamMemberHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const user = await createAdminUser({
+      firstName: typeof body.firstName === "string" ? body.firstName : "",
+      lastName: typeof body.lastName === "string" ? body.lastName : "",
+      email: typeof body.email === "string" ? body.email : "",
+      phone: typeof body.phone === "string" ? body.phone : "",
+      countryCode: typeof body.countryCode === "string" ? body.countryCode : "",
+      password: typeof body.password === "string" ? body.password : "",
+    });
+    await recordAdminActivity({
+      actorUserId: req.auth.userId,
+      action: "admin_created",
+      entityType: "user",
+      entityId: user.id,
+      summary: `Created admin ${user.firstName} ${user.lastName} (${user.email})`,
+      metadata: { email: user.email },
+    });
+    res.status(201).json({ user });
+  } catch (err) {
+    handleAdminError(err, res, "Failed to create admin");
+  }
+}
+
+export async function getAdminActivityLogsHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    let page = 1;
+    let limit = 20;
+    const rawPage = req.query.page;
+    const rawLimit = req.query.limit;
+    if (typeof rawPage === "string" && /^\d+$/.test(rawPage)) {
+      page = Math.max(1, parseInt(rawPage, 10));
+    }
+    if (typeof rawLimit === "string" && /^\d+$/.test(rawLimit)) {
+      limit = Math.min(100, Math.max(1, parseInt(rawLimit, 10)));
+    }
+
+    let sort: "newest" | "oldest" = "newest";
+    if (req.query.sort === "oldest" || req.query.sort === "newest") {
+      sort = req.query.sort;
+    }
+
+    let action: AdminActivityAction | "all" = "all";
+    const rawAction = req.query.action;
+    if (
+      typeof rawAction === "string" &&
+      (adminActivityActionValues as readonly string[]).includes(rawAction)
+    ) {
+      action = rawAction as AdminActivityAction;
+    }
+
+    const result = await listAdminActivityLogs({
+      page,
+      limit,
+      sort,
+      action,
+      from: typeof req.query.from === "string" ? req.query.from : undefined,
+      to: typeof req.query.to === "string" ? req.query.to : undefined,
+      q: typeof req.query.q === "string" ? req.query.q : undefined,
+    });
+    res.status(200).json(result);
+  } catch (err) {
+    handleAdminError(err, res, "Failed to load activity logs");
+  }
+}
+
 export async function getAdminUserDetailHandler(
   req: Request,
   res: Response,
@@ -185,6 +273,15 @@ export async function patchAdminUserHandler(
       req.auth.userId,
       action as AdminUserAction,
     );
+    const activityAction = activityActionForUserAction(action as AdminUserAction);
+    await recordAdminActivity({
+      actorUserId: req.auth.userId,
+      action: activityAction,
+      entityType: "user",
+      entityId: user.id,
+      summary: `${ADMIN_ACTIVITY_ACTION_LABELS[activityAction]}: ${user.firstName} ${user.lastName} (${user.email})`,
+      metadata: { action, email: user.email },
+    });
     res.status(200).json({ user });
   } catch (err) {
     handleAdminError(err, res, "Failed to update user");
@@ -355,6 +452,10 @@ export async function patchAdminListingAvailabilityHandler(
   res: Response,
 ): Promise<void> {
   try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
     const serviceId =
       typeof req.params.serviceId === "string" ? req.params.serviceId : "";
     const body = req.body as { isAvailable?: unknown };
@@ -366,6 +467,17 @@ export async function patchAdminListingAvailabilityHandler(
       serviceId,
       body.isAvailable,
     );
+    await recordAdminActivity({
+      actorUserId: req.auth.userId,
+      action: body.isAvailable ? "listing_enabled" : "listing_disabled",
+      entityType: "listing",
+      entityId: listing.id,
+      summary: `${body.isAvailable ? "Enabled" : "Disabled"} listing “${listing.title}”`,
+      metadata: {
+        isAvailable: body.isAvailable,
+        title: listing.title,
+      },
+    });
     res.status(200).json({ listing });
   } catch (err) {
     handleAdminError(err, res, "Failed to update listing availability");
@@ -547,6 +659,16 @@ export async function postAdminCategoryHandler(
       createInput.bannerUrl = bannerUrl ?? null;
     }
     const category = await createAdminCategory(createInput);
+    if (req.auth) {
+      await recordAdminActivity({
+        actorUserId: req.auth.userId,
+        action: "category_created",
+        entityType: "category",
+        entityId: category.id,
+        summary: `Created category “${category.name}”`,
+        metadata: { slug: category.slug, name: category.name },
+      });
+    }
     res.status(201).json({ category });
   } catch (err) {
     handleAdminError(err, res, "Failed to create category");
@@ -654,6 +776,16 @@ export async function patchAdminCategoryHandler(
     }
 
     const category = await updateAdminCategoryBySlug(slug, input);
+    if (req.auth) {
+      await recordAdminActivity({
+        actorUserId: req.auth.userId,
+        action: "category_updated",
+        entityType: "category",
+        entityId: category.id,
+        summary: `Updated category “${category.name}”`,
+        metadata: { slug: category.slug, name: category.name },
+      });
+    }
     res.status(200).json({ category });
   } catch (err) {
     handleAdminError(err, res, "Failed to update category");

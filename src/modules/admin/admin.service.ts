@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import bcrypt from "bcrypt";
 import { Order } from "../../models/order.model";
 import { Service } from "../../models/service.model";
 import { ServiceProvider } from "../../models/serviceProvider.model";
@@ -6,12 +7,14 @@ import { User } from "../../models/user.model";
 import {
   type SupportedCurrency,
 } from "../../shared/currency/types";
+import { normalizeCountryCode } from "../../shared/lib/countryCode";
 import {
   getReceiptByOrderId,
   OrdersHttpError,
   type ReceiptDetailDto,
 } from "../orders/orders.service";
 
+const SALT_ROUNDS = 10;
 const ACTIVE_LISTING_FILTER = {
   $or: [{ isAvailable: true }, { isAvailable: { $exists: false } }],
 };
@@ -404,6 +407,60 @@ export async function listAdminUsers(
     totalPages: total === 0 ? 1 : Math.ceil(total / limit),
     counts,
   };
+}
+
+export type CreateAdminUserInput = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  countryCode: string;
+  password: string;
+};
+
+export async function createAdminUser(
+  input: CreateAdminUserInput,
+): Promise<AdminUserListItem> {
+  const firstName = input.firstName?.trim() ?? "";
+  const lastName = input.lastName?.trim() ?? "";
+  const email = input.email?.trim().toLowerCase() ?? "";
+  const phone = input.phone?.trim() ?? "";
+  const password = input.password ?? "";
+
+  if (!firstName || !lastName || !email || !phone) {
+    throw new AdminHttpError(400, "All fields are required");
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new AdminHttpError(400, "Invalid email address");
+  }
+  if (password.length < 8) {
+    throw new AdminHttpError(400, "Password must be at least 8 characters");
+  }
+
+  const countryCode = normalizeCountryCode(input.countryCode);
+  if (!countryCode) {
+    throw new AdminHttpError(400, "Invalid country");
+  }
+
+  const existing = await User.findOne({ email }).select("_id role").lean();
+  if (existing) {
+    throw new AdminHttpError(409, "An account with this email already exists");
+  }
+
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+  const user = await User.create({
+    firstName,
+    lastName,
+    email,
+    phone,
+    countryCode,
+    password: passwordHash,
+    role: "admin",
+    emailVerified: true,
+    dateOfBirth: null,
+  });
+
+  return mapAdminUserListItem(user);
 }
 
 export async function getAdminUserDetail(

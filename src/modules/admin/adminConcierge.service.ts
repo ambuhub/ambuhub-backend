@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
-import { ConciergeRequest } from "../../models/conciergeRequest.model";
+import {
+  ConciergeRequest,
+  CONCIERGE_INQUIRY_TYPE_LABELS,
+  conciergeInquiryTypeValues,
+  type ConciergeInquiryType,
+} from "../../models/conciergeRequest.model";
 import { AdminHttpError } from "./admin.service";
 
 export type AdminConciergeStatus = "pending" | "in_progress" | "resolved";
@@ -18,6 +23,8 @@ export type AdminConciergeListItem = {
   name: string;
   email: string;
   phone: string;
+  inquiryType: string | null;
+  inquiryTypeLabel: string | null;
   categoryName: string;
   departmentName: string;
   status: AdminConciergeStatus;
@@ -53,17 +60,28 @@ function mapConciergeListItem(doc: {
   name: string;
   email: string;
   phone: string;
+  inquiryType?: string | null;
   categoryName: string;
   departmentName: string;
   status: AdminConciergeStatus;
   createdAt: Date;
 }): AdminConciergeListItem {
+  const inquiryType =
+    typeof doc.inquiryType === "string" &&
+    (conciergeInquiryTypeValues as readonly string[]).includes(doc.inquiryType)
+      ? (doc.inquiryType as ConciergeInquiryType)
+      : null;
+
   return {
     id: doc._id.toString(),
     userId: doc.userId.toString(),
     name: doc.name,
     email: doc.email,
     phone: doc.phone,
+    inquiryType,
+    inquiryTypeLabel: inquiryType
+      ? CONCIERGE_INQUIRY_TYPE_LABELS[inquiryType]
+      : null,
     categoryName: doc.categoryName,
     departmentName: doc.departmentName,
     status: doc.status,

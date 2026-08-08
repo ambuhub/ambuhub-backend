@@ -3,6 +3,23 @@ import { normalizeCountryCode } from "../shared/lib/countryCode";
 
 export type ConciergeRequestStatus = "pending" | "in_progress" | "resolved";
 
+export const conciergeInquiryTypeValues = [
+  "transport_booking",
+  "event_coverage",
+  "equipment_sourcing",
+  "other",
+] as const;
+
+export type ConciergeInquiryType = (typeof conciergeInquiryTypeValues)[number];
+
+export const CONCIERGE_INQUIRY_TYPE_LABELS: Record<ConciergeInquiryType, string> =
+  {
+    transport_booking: "Transport booking help",
+    event_coverage: "Event medical coverage",
+    equipment_sourcing: "Equipment or fleet sourcing",
+    other: "Other",
+  };
+
 const conciergeRequestSchema = new mongoose.Schema(
   {
     userId: {
@@ -21,6 +38,11 @@ const conciergeRequestSchema = new mongoose.Schema(
       maxlength: 320,
     },
     countryCode: { type: String, required: true, trim: true, maxlength: 2 },
+    inquiryType: {
+      type: String,
+      enum: conciergeInquiryTypeValues,
+      required: true,
+    },
     categorySlug: { type: String, required: true, trim: true, maxlength: 120 },
     categoryName: { type: String, required: true, trim: true, maxlength: 200 },
     departmentSlug: {

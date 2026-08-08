@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticate, requireAdmin } from "../../shared/middlewares/authenticate";
 import {
+  getAdminActivityLogsHandler,
   getAdminCategoriesHandler,
   getAdminConciergeRequestDetailHandler,
   getAdminConciergeRequestsHandler,
@@ -21,6 +22,7 @@ import {
   patchAdminNotificationsReadAllHandler,
   patchAdminUserHandler,
   postAdminCategoryHandler,
+  postAdminTeamMemberHandler,
 } from "./admin.controller";
 
 const router = Router();
@@ -31,6 +33,8 @@ router.get("/transactions-by-month", getAdminTransactionsByMonthHandler);
 router.get("/users", getAdminUsersHandler);
 router.get("/users/:userId", getAdminUserDetailHandler);
 router.patch("/users/:userId", patchAdminUserHandler);
+router.post("/team", postAdminTeamMemberHandler);
+router.get("/activity-logs", getAdminActivityLogsHandler);
 router.get("/orders", getAdminOrdersHandler);
 router.get("/orders/:orderId/receipt", getAdminOrderReceiptHandler);
 router.get("/orders/:orderId", getAdminOrderDetailHandler);

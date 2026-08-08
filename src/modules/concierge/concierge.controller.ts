@@ -20,6 +20,8 @@ export async function postConciergeRequestHandler(
       phone: typeof body.phone === "string" ? body.phone : "",
       email: typeof body.email === "string" ? body.email : "",
       countryCode: typeof body.countryCode === "string" ? body.countryCode : "",
+      inquiryType:
+        typeof body.inquiryType === "string" ? body.inquiryType : "",
       categorySlug:
         typeof body.categorySlug === "string" ? body.categorySlug : "",
       departmentSlug:

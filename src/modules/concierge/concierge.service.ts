@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
-import { ConciergeRequest } from "../../models/conciergeRequest.model";
+import {
+  ConciergeRequest,
+  CONCIERGE_INQUIRY_TYPE_LABELS,
+  conciergeInquiryTypeValues,
+  type ConciergeInquiryType,
+} from "../../models/conciergeRequest.model";
 import { ServiceCategory } from "../../models/serviceCategory.model";
 import { normalizeCountryCode } from "../../shared/lib/countryCode";
 import { notifyAdminsOfConciergeRequest } from "../admin/adminNotifications.service";
@@ -22,6 +27,7 @@ export type CreateConciergeRequestInput = {
   phone: string;
   email: string;
   countryCode: string;
+  inquiryType: string;
   categorySlug: string;
   departmentSlug: string;
   description: string;
@@ -33,6 +39,8 @@ export type ConciergeRequestDto = {
   phone: string;
   email: string;
   countryCode: string;
+  inquiryType: ConciergeInquiryType;
+  inquiryTypeLabel: string;
   categorySlug: string;
   categoryName: string;
   departmentSlug: string;
@@ -51,6 +59,14 @@ function trimRequired(value: string, field: string, maxLen: number): string {
     throw new ConciergeHttpError(400, `${field} is too long`);
   }
   return trimmed;
+}
+
+function parseInquiryType(raw: string): ConciergeInquiryType {
+  const trimmed = raw?.trim() ?? "";
+  if ((conciergeInquiryTypeValues as readonly string[]).includes(trimmed)) {
+    return trimmed as ConciergeInquiryType;
+  }
+  throw new ConciergeHttpError(400, "Please select a valid inquiry type");
 }
 
 async function resolveCategoryAndDepartment(
@@ -116,6 +132,7 @@ export async function createConciergeRequest(
     throw new ConciergeHttpError(400, "Invalid country");
   }
 
+  const inquiryType = parseInquiryType(input.inquiryType);
   const categorySlug = trimRequired(input.categorySlug, "Service category", 120);
   const departmentSlug = trimRequired(input.departmentSlug, "Department", 120);
   const description = trimRequired(input.description, "Description", 5000);
@@ -137,6 +154,7 @@ export async function createConciergeRequest(
     phone,
     email,
     countryCode,
+    inquiryType,
     categorySlug,
     categoryName,
     departmentSlug,
@@ -151,6 +169,9 @@ export async function createConciergeRequest(
     phone: doc.phone,
     email: doc.email,
     countryCode: doc.countryCode,
+    inquiryType: doc.inquiryType as ConciergeInquiryType,
+    inquiryTypeLabel:
+      CONCIERGE_INQUIRY_TYPE_LABELS[doc.inquiryType as ConciergeInquiryType],
     categorySlug: doc.categorySlug,
     categoryName: doc.categoryName,
     departmentSlug: doc.departmentSlug,

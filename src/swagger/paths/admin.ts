@@ -151,6 +151,143 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *
+ * /api/admin/team:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Create an admin team member
+ *     description: |
+ *       Admin only. Creates a verified admin account that can sign in to the
+ *       admin dashboard. Email must not already be registered.
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateAdminTeamMemberBody'
+ *     responses:
+ *       201:
+ *         description: Admin created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AdminUserDetailResponse'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Not an admin
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       409:
+ *         description: Email already registered
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/admin/activity-logs:
+ *   get:
+ *     tags: [Admin]
+ *     summary: List admin activity logs
+ *     description: |
+ *       Admin only. Paginated audit trail of admin actions, newest first by
+ *       default. Filter by date range (`from` / `to` as YYYY-MM-DD or ISO)
+ *       and optional action or search text.
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *         example: 20
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *         description: Inclusive start date (YYYY-MM-DD or ISO datetime)
+ *         example: "2026-01-01"
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *         description: Inclusive end date (YYYY-MM-DD or ISO datetime)
+ *         example: "2026-12-31"
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [newest, oldest]
+ *           default: newest
+ *       - in: query
+ *         name: action
+ *         schema:
+ *           type: string
+ *           enum:
+ *             - admin_created
+ *             - user_verified
+ *             - user_unverified
+ *             - user_suspended
+ *             - user_unsuspended
+ *             - user_promoted_to_provider
+ *             - user_demoted_to_client
+ *             - category_created
+ *             - category_updated
+ *             - listing_enabled
+ *             - listing_disabled
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *         description: Search summary, actor name/email, or entity id
+ *     responses:
+ *       200:
+ *         description: Paginated activity logs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AdminActivityLogsListResponse'
+ *       400:
+ *         description: Invalid date range or query
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Not an admin
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
  * /api/admin/users/{userId}:
  *   get:
  *     tags: [Admin]

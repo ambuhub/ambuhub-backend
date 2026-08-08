@@ -154,6 +154,7 @@ async function submitConciergeRequest(client: AuthSession): Promise<string> {
       phone: "+2348000000000",
       email: client.email,
       countryCode: "NG",
+      inquiryType: "other",
       categorySlug: "something-else",
       departmentSlug: "something-else",
       description: "Automated e2e push notification test request from script.",

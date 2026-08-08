@@ -1634,6 +1634,89 @@
  *           nullable: true
  *           format: date
  *
+ *     CreateAdminTeamMemberBody:
+ *       type: object
+ *       required:
+ *         - firstName
+ *         - lastName
+ *         - email
+ *         - phone
+ *         - countryCode
+ *         - password
+ *       properties:
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         email:
+ *           type: string
+ *           format: email
+ *         phone:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *           description: ISO 3166-1 alpha-2 country code
+ *         password:
+ *           type: string
+ *           minLength: 8
+ *
+ *     AdminActivityLogListItem:
+ *       type: object
+ *       required:
+ *         - id
+ *         - actorUserId
+ *         - actorName
+ *         - actorEmail
+ *         - action
+ *         - actionLabel
+ *         - entityType
+ *         - summary
+ *         - createdAt
+ *       properties:
+ *         id:
+ *           type: string
+ *         actorUserId:
+ *           type: string
+ *         actorName:
+ *           type: string
+ *         actorEmail:
+ *           type: string
+ *         action:
+ *           type: string
+ *         actionLabel:
+ *           type: string
+ *         entityType:
+ *           type: string
+ *           enum: [user, category, listing]
+ *         entityId:
+ *           type: string
+ *           nullable: true
+ *         summary:
+ *           type: string
+ *         metadata:
+ *           type: object
+ *           additionalProperties: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     AdminActivityLogsListResponse:
+ *       type: object
+ *       required: [logs, page, limit, total, totalPages]
+ *       properties:
+ *         logs:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/AdminActivityLogListItem'
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *
  *     AdminUsersRoleCounts:
  *       type: object
  *       required: [all, client, service_provider, admin]
@@ -1894,6 +1977,7 @@
  *         - phone
  *         - email
  *         - countryCode
+ *         - inquiryType
  *         - categorySlug
  *         - departmentSlug
  *         - description
@@ -1907,6 +1991,9 @@
  *         countryCode:
  *           type: string
  *           description: ISO 3166-1 alpha-2 country code
+ *         inquiryType:
+ *           type: string
+ *           enum: [transport_booking, event_coverage, equipment_sourcing, other]
  *         categorySlug:
  *           type: string
  *           description: Service category slug or `something-else`
@@ -1928,6 +2015,11 @@
  *         email:
  *           type: string
  *         countryCode:
+ *           type: string
+ *         inquiryType:
+ *           type: string
+ *           enum: [transport_booking, event_coverage, equipment_sourcing, other]
+ *         inquiryTypeLabel:
  *           type: string
  *         categorySlug:
  *           type: string
@@ -1966,6 +2058,13 @@
  *           type: string
  *         phone:
  *           type: string
+ *         inquiryType:
+ *           type: string
+ *           nullable: true
+ *           enum: [transport_booking, event_coverage, equipment_sourcing, other]
+ *         inquiryTypeLabel:
+ *           type: string
+ *           nullable: true
  *         categoryName:
  *           type: string
  *         departmentName:
