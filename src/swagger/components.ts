@@ -6,7 +6,7 @@
  *       type: apiKey
  *       in: cookie
  *       name: ambuhub_access_token
- *       description: JWT session cookie set by POST /api/auth/login or /api/auth/register
+ *       description: JWT session cookie set by POST /api/auth/login, /api/auth/admin/login, or /api/auth/register
  *
  *   schemas:
  *     ErrorMessage:

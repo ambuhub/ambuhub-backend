@@ -90,7 +90,8 @@ async function loginOrSkip(role: Role): Promise<AuthSession | null> {
 
 async function login(role: Role): Promise<AuthSession> {
   const creds = USERS[role];
-  const res = await apiFetch("/auth/login", {
+  const path = role === "admin" ? "/auth/admin/login" : "/auth/login";
+  const res = await apiFetch(path, {
     method: "POST",
     body: JSON.stringify({ email: creds.email, password: creds.password }),
   });

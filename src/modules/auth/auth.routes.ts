@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../../shared/middlewares/authenticate";
 import {
+  adminLoginHandler,
   changePasswordHandler,
   forgotPasswordHandler,
   getMeHandler,
@@ -14,6 +15,7 @@ const router = Router();
 
 router.post("/register", registerHandler);
 router.post("/login", loginHandler);
+router.post("/admin/login", adminLoginHandler);
 router.post("/logout", logoutHandler);
 router.post("/forgot-password", forgotPasswordHandler);
 router.get("/me", authenticate, getMeHandler);

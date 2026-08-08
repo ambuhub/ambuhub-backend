@@ -381,6 +381,10 @@ export async function login(
     throw new AuthHttpError(403, "This account has been suspended.");
   }
 
+  if (user.role === "admin") {
+    throw new AuthHttpError(401, "Invalid email or password");
+  }
+
   let providerForResponse: PublicAuthUserProvider | null = null;
   if (user.role === "service_provider") {
     const row = await ServiceProvider.findOne({ userId: user._id }).lean();
@@ -404,6 +408,39 @@ export async function login(
   return {
     token,
     user: toPublicUser(user, providerForResponse),
+  };
+}
+
+export async function adminLogin(
+  input: LoginInput,
+): Promise<{ token: string; user: PublicAuthUser }> {
+  const { email, password } = input;
+  if (!email?.trim() || !password) {
+    throw new AuthHttpError(400, "Email and password are required");
+  }
+
+  const user = await User.findOne({
+    email: email.trim().toLowerCase(),
+  }).select("+password");
+
+  if (!user || user.role !== "admin") {
+    throw new AuthHttpError(401, "Invalid email or password");
+  }
+
+  const match = await bcrypt.compare(password, user.password);
+  if (!match) {
+    throw new AuthHttpError(401, "Invalid email or password");
+  }
+
+  if (user.isSuspended) {
+    throw new AuthHttpError(403, "This account has been suspended.");
+  }
+
+  const token = signToken(user._id.toString(), user.role);
+
+  return {
+    token,
+    user: toPublicUser(user, null),
   };
 }
 
@@ -435,6 +472,14 @@ export async function resetPasswordWithoutVerification(
   }
   if (!newPassword || newPassword.length < 8) {
     throw new AuthHttpError(400, "Password must be at least 8 characters");
+  }
+
+  const existing = await User.findOne({ email }).select("role").lean();
+  if (!existing || existing.role === "admin") {
+    logger.info("Unverified password reset skipped", {
+      reason: !existing ? "unknown_email" : "admin_account",
+    });
+    return;
   }
 
   const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);

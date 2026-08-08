@@ -69,10 +69,10 @@
  * /api/auth/login:
  *   post:
  *     tags: [Auth]
- *     summary: Log in
+ *     summary: Log in (clients and service providers)
  *     description: |
  *       Authenticates with email/password and sets the session cookie.
- *       Admins use the same endpoint; the returned user role may be `admin`.
+ *       Admin accounts are rejected here and must use `POST /api/auth/admin/login`.
  *     requestBody:
  *       required: true
  *       content:
@@ -88,6 +88,51 @@
  *               $ref: '#/components/schemas/AuthUserResponse'
  *       401:
  *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Suspended account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/auth/admin/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Admin portal log in
+ *     description: |
+ *       Authenticates an admin account only and sets the session cookie.
+ *       Non-admin credentials receive a generic invalid credentials response.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/LoginRequest'
+ *     responses:
+ *       200:
+ *         description: Login successful; session cookie set
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthUserResponse'
+ *       401:
+ *         description: Invalid credentials or not an admin
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Suspended account
  *         content:
  *           application/json:
  *             schema:

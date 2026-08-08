@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { clearAuthCookie, setAuthCookie } from "./auth.cookie";
 import {
   AuthHttpError,
+  adminLogin,
   changePassword,
   getSessionUser,
   login,
@@ -41,6 +42,24 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       return;
     }
     logger.error("login failed", { error: err });
+    res.status(500).json({ message: "Login failed" });
+  }
+}
+
+export async function adminLoginHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const result = await adminLogin(req.body);
+    setAuthCookie(res, result.token);
+    res.status(200).json({ user: result.user });
+  } catch (err) {
+    if (err instanceof AuthHttpError) {
+      res.status(err.statusCode).json({ message: err.message });
+      return;
+    }
+    logger.error("admin login failed", { error: err });
     res.status(500).json({ message: "Login failed" });
   }
 }
