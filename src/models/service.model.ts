@@ -112,6 +112,15 @@ const serviceSchema = new mongoose.Schema(
       },
     },
     liveLocationUpdatedAt: { type: Date, default: null },
+    /** Dispatch crew user linked 1:1 to this ground-ambulance listing. */
+    dispatchUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
   },
   { timestamps: true }
 );

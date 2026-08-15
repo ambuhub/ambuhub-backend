@@ -273,7 +273,7 @@ export const NotificationTemplates = {
       "ambulance_request",
       "New ambulance request",
       `New request near ${locationLabel} (${input.distanceKm.toFixed(1)} km away). Respond within 4 minutes.`,
-      "/provider/dispatch/requests",
+      "/dispatch/requests",
       {
         entityId: input.requestId,
         serviceId: undefined,
@@ -328,7 +328,7 @@ export const NotificationTemplates = {
       "general",
       "Dispatch request cancelled",
       "The client cancelled their ambulance request.",
-      "/provider/dispatch/requests",
+      "/dispatch/requests",
       {
         entityId: input.requestId,
         category: "ambulance_updates",

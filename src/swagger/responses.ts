@@ -8,7 +8,7 @@
  *       properties:
  *         token:
  *           type: string
- *           description: JWT for mobile `Authorization: Bearer` (also set as httpOnly cookie for web)
+ *           description: "JWT for mobile Authorization Bearer header (also set as httpOnly cookie for web)"
  *         user:
  *           $ref: '#/components/schemas/PublicUser'
  *       example:
@@ -69,7 +69,7 @@
  *       properties:
  *         token:
  *           type: string
- *           description: JWT for mobile `Authorization: Bearer` (also set as httpOnly cookie for web)
+ *           description: "JWT for mobile Authorization Bearer header (also set as httpOnly cookie for web)"
  *         user:
  *           $ref: '#/components/schemas/PublicUser'
  *         requiresEmailVerification:
@@ -2717,7 +2717,7 @@
  *
  *     DispatchRequest:
  *       type: object
- *       required: [id, status, pickup, clientNotes, attempts, createdAt]
+ *       required: [id, status, pickup, contactPhone, clientNotes, attempts, createdAt]
  *       properties:
  *         id:
  *           type: string
@@ -2725,6 +2725,11 @@
  *           $ref: '#/components/schemas/DispatchStatus'
  *         pickup:
  *           $ref: '#/components/schemas/DispatchPickup'
+ *         contactPhone:
+ *           type: string
+ *           nullable: true
+ *           description: Number for crew to call on arrival (snapshot from request create)
+ *           maxLength: 32
  *         clientNotes:
  *           type: string
  *           nullable: true
@@ -2759,6 +2764,7 @@
  *           lat: 6.5244
  *           lng: 3.3792
  *           address: "12 Admiralty Way, Lekki, Lagos"
+ *         contactPhone: "08012345678"
  *         clientNotes: "Patient conscious, chest pain"
  *         assignedService:
  *           id: "507f1f77bcf86cd799439012"
@@ -2830,6 +2836,10 @@
  *           type: number
  *           minimum: -180
  *           maximum: 180
+ *         contactPhone:
+ *           type: string
+ *           maxLength: 32
+ *           description: Number for crew to call on arrival. Defaults to the client's registered phone when omitted.
  *         notes:
  *           type: string
  *           maxLength: 1000
@@ -2837,6 +2847,7 @@
  *         locationSource: current_location
  *         latitude: 6.5244
  *         longitude: 3.3792
+ *         contactPhone: "08012345678"
  *         notes: "Patient conscious, chest pain"
  *
  *     DispatchCreateRequestAddress:
@@ -2848,12 +2859,17 @@
  *           enum: [address]
  *         address:
  *           type: string
+ *         contactPhone:
+ *           type: string
+ *           maxLength: 32
+ *           description: Number for crew to call on arrival. Defaults to the client's registered phone when omitted.
  *         notes:
  *           type: string
  *           maxLength: 1000
  *       example:
  *         locationSource: address
  *         address: "12 Admiralty Way, Lekki, Lagos"
+ *         contactPhone: "08012345678"
  *         notes: "Gate 2, blue building"
  *
  *     DispatchConflictResponse:
@@ -2882,11 +2898,20 @@
  *           type: string
  *           format: date-time
  *           nullable: true
+ *         dispatchUserId:
+ *           type: string
+ *           nullable: true
+ *           description: Present on provider monitoring responses when a crew account is linked
+ *         hasDispatchAccount:
+ *           type: boolean
+ *           description: Present on provider monitoring responses
  *       example:
  *         id: "507f1f77bcf86cd799439012"
  *         title: "BLS Ground Ambulance"
  *         dispatchEnabled: true
  *         liveLocationUpdatedAt: "2026-08-06T12:00:00.000Z"
+ *         dispatchUserId: "507f1f77bcf86cd799439099"
+ *         hasDispatchAccount: true
  *
  *     DispatchServiceListResponse:
  *       type: object
@@ -2945,4 +2970,161 @@
  *       example:
  *         latitude: 6.5244
  *         longitude: 3.3792
+ *
+ *     ProviderDispatchAccount:
+ *       type: object
+ *       required:
+ *         - id
+ *         - firstName
+ *         - lastName
+ *         - email
+ *         - phone
+ *         - countryCode
+ *         - isDisabled
+ *         - assignedServiceId
+ *         - listingTitle
+ *         - dispatchEnabled
+ *         - liveLocationUpdatedAt
+ *         - isAvailable
+ *         - activeRequestId
+ *         - activeRequestStatus
+ *         - lastAttemptOutcome
+ *       properties:
+ *         id:
+ *           type: string
+ *           description: Dispatch user id
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         email:
+ *           type: string
+ *           format: email
+ *         phone:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *           description: ISO 3166-1 alpha-2
+ *         isDisabled:
+ *           type: boolean
+ *           description: When true, the crew cannot log in and will not receive offers
+ *         assignedServiceId:
+ *           type: string
+ *           description: Linked ground-ambulance listing id (1:1)
+ *         listingTitle:
+ *           type: string
+ *         dispatchEnabled:
+ *           type: boolean
+ *           description: Whether the linked listing is currently on duty
+ *         liveLocationUpdatedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         isAvailable:
+ *           type: boolean
+ *           description: Listing marketplace availability flag
+ *         activeRequestId:
+ *           type: string
+ *           nullable: true
+ *         activeRequestStatus:
+ *           type: string
+ *           nullable: true
+ *         lastAttemptOutcome:
+ *           type: string
+ *           nullable: true
+ *           description: Last non-pending offer outcome for this crew (accepted, rejected, timeout)
+ *       example:
+ *         id: "507f1f77bcf86cd799439099"
+ *         firstName: "Ada"
+ *         lastName: "Crew"
+ *         email: "unit1@example.com"
+ *         phone: "08012345678"
+ *         countryCode: "NG"
+ *         isDisabled: false
+ *         assignedServiceId: "507f1f77bcf86cd799439012"
+ *         listingTitle: "BLS Ground Ambulance"
+ *         dispatchEnabled: true
+ *         liveLocationUpdatedAt: "2026-08-06T12:00:00.000Z"
+ *         isAvailable: true
+ *         activeRequestId: null
+ *         activeRequestStatus: null
+ *         lastAttemptOutcome: "accepted"
+ *
+ *     ProviderDispatchAccountResponse:
+ *       type: object
+ *       required: [account]
+ *       properties:
+ *         account:
+ *           $ref: '#/components/schemas/ProviderDispatchAccount'
+ *
+ *     ProviderDispatchAccountListResponse:
+ *       type: object
+ *       required: [accounts]
+ *       properties:
+ *         accounts:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/ProviderDispatchAccount'
+ *
+ *     ProviderDispatchAvailableListing:
+ *       type: object
+ *       required: [id, title]
+ *       properties:
+ *         id:
+ *           type: string
+ *         title:
+ *           type: string
+ *       example:
+ *         id: "507f1f77bcf86cd799439012"
+ *         title: "BLS Ground Ambulance"
+ *
+ *     ProviderDispatchAvailableListingsResponse:
+ *       type: object
+ *       required: [services]
+ *       properties:
+ *         services:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/ProviderDispatchAvailableListing'
+ *
+ *     CreateProviderDispatchAccountRequest:
+ *       type: object
+ *       required: [firstName, lastName, email, phone, countryCode, password, serviceId]
+ *       properties:
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         email:
+ *           type: string
+ *           format: email
+ *         phone:
+ *           type: string
+ *         countryCode:
+ *           type: string
+ *           description: ISO 3166-1 alpha-2 (e.g. NG)
+ *         password:
+ *           type: string
+ *           minLength: 8
+ *           format: password
+ *         serviceId:
+ *           type: string
+ *           description: Ground ambulance listing id that is not yet linked
+ *       example:
+ *         firstName: "Ada"
+ *         lastName: "Crew"
+ *         email: "unit1@example.com"
+ *         phone: "08012345678"
+ *         countryCode: "NG"
+ *         password: "SecurePass123!"
+ *         serviceId: "507f1f77bcf86cd799439012"
+ *
+ *     PatchProviderDispatchAccountRequest:
+ *       type: object
+ *       required: [isDisabled]
+ *       properties:
+ *         isDisabled:
+ *           type: boolean
+ *       example:
+ *         isDisabled: true
  */

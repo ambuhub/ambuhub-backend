@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { normalizeCountryCode } from "../shared/lib/countryCode";
 
-export type UserRole = "client" | "service_provider" | "admin";
+export type UserRole = "client" | "service_provider" | "admin" | "dispatch";
 
 const userSchema = new mongoose.Schema(
   {
@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: {
       type: String,
-      enum: ["client", "service_provider", "admin"],
+      enum: ["client", "service_provider", "admin", "dispatch"],
       required: true,
     },
     emailVerified: { type: Boolean, default: false },
@@ -32,6 +32,23 @@ const userSchema = new mongoose.Schema(
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
       default: [],
     },
+    /** Owning service_provider user (dispatch role only). */
+    ownerProviderUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+    /** Ground ambulance listing linked 1:1 (dispatch role only). */
+    assignedServiceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Service",
+      default: null,
+      unique: true,
+      sparse: true,
+    },
+    /** When true, dispatch login is blocked (e.g. listing marked unavailable). */
+    isDisabled: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

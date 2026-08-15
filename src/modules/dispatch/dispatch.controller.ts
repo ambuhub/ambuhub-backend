@@ -8,8 +8,11 @@ import {
   getClientDispatchHistory,
   getDispatchRequestById,
   getDispatchRoute,
+  getDispatchUserPendingOffer,
+  getDispatchUserRequests,
   getProviderPendingOffer,
   getProviderDispatchRequests,
+  listDispatchUserServices,
   listProviderDispatchServices,
   markDispatchArrived,
   rejectDispatchRequest,
@@ -50,6 +53,8 @@ export async function postDispatchRequestHandler(
         typeof body.longitude === "number" ? body.longitude : undefined,
       address: typeof body.address === "string" ? body.address : undefined,
       notes: typeof body.notes === "string" ? body.notes : undefined,
+      contactPhone:
+        typeof body.contactPhone === "string" ? body.contactPhone : undefined,
     });
 
     res.status(201).json({ request });
@@ -330,6 +335,66 @@ export async function getProviderDispatchServicesHandler(
     }
 
     const services = await listProviderDispatchServices(req.auth.userId);
+    res.status(200).json({ services });
+  } catch (err) {
+    if (handleDispatchError(err, res)) {
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getDispatchUserOfferHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const offer = await getDispatchUserPendingOffer(req.auth.userId);
+    res.status(200).json({ offer });
+  } catch (err) {
+    if (handleDispatchError(err, res)) {
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getDispatchUserRequestsHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const requests = await getDispatchUserRequests(req.auth.userId);
+    res.status(200).json({ requests });
+  } catch (err) {
+    if (handleDispatchError(err, res)) {
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function getDispatchUserServicesHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const services = await listDispatchUserServices(req.auth.userId);
     res.status(200).json({ services });
   } catch (err) {
     if (handleDispatchError(err, res)) {

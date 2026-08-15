@@ -128,7 +128,7 @@
  *   get:
  *     tags: [Dispatch]
  *     summary: Get dispatch request by id
- *     description: Client may read own requests; assigned provider may read assigned requests; admins may read any.
+ *     description: Client may read own requests; assigned dispatch crew or provider owner may read assigned requests; admins may read any.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -266,13 +266,15 @@
  * /api/dispatch/provider/offer:
  *   get:
  *     tags: [Dispatch]
- *     summary: Get provider's current pending offer
- *     description: Returns the nearest-expiring active offer for the authenticated provider, or `null`. Poll every ~5s while on duty.
+ *     summary: Provider pending offer (always null)
+ *     description: |
+ *       Service providers no longer receive offers. Offers go to linked `dispatch` accounts
+ *       via `GET /api/dispatch/crew/offer`. This endpoint remains for monitoring clients and returns `null`.
  *     security:
  *       - cookieAuth: []
  *     responses:
  *       200:
- *         description: Pending offer or null
+ *         description: Always `{ offer: null }` for providers
  *         content:
  *           application/json:
  *             schema:
@@ -290,11 +292,99 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *
+ * /api/dispatch/crew/offer:
+ *   get:
+ *     tags: [Dispatch]
+ *     summary: Get dispatch crew pending offer
+ *     description: |
+ *       Returns the active offer for the authenticated **dispatch** account, or null.
+ *       Poll every ~5 seconds while on duty. Role: `dispatch`.
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: Pending offer or null
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DispatchOfferResponse'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Not a dispatch account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/dispatch/crew/requests:
+ *   get:
+ *     tags: [Dispatch]
+ *     summary: List requests for this dispatch account
+ *     description: |
+ *       Inbox for the authenticated crew (offers, active, and recent). Role: `dispatch`.
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: Request list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DispatchRequestListResponse'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Not a dispatch account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
+ * /api/dispatch/crew/services:
+ *   get:
+ *     tags: [Dispatch]
+ *     summary: List linked ambulance for this dispatch account
+ *     description: |
+ *       Usually returns a single ground-ambulance listing linked 1:1 to this crew account.
+ *       Use `id` when calling go-on-duty and location endpoints. Role: `dispatch`.
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: Linked ground-ambulance listing(s)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DispatchServiceListResponse'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *       403:
+ *         description: Not a dispatch account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorMessage'
+ *
  * /api/dispatch/provider/requests:
  *   get:
  *     tags: [Dispatch]
- *     summary: List all dispatch requests assigned to the provider
- *     description: Returns up to 50 assigned requests (incoming, active, completed), newest first.
+ *     summary: List dispatch requests for provider monitoring
+ *     description: |
+ *       Returns up to 50 requests for this provider's fleet (newest first).
+ *       Providers **monitor** only — they do not accept or go on duty. Role: `service_provider`.
  *     security:
  *       - cookieAuth: []
  *     responses:
@@ -320,8 +410,10 @@
  * /api/dispatch/provider/services:
  *   get:
  *     tags: [Dispatch]
- *     summary: List provider ground ambulance listings for dispatch
- *     description: Only **Medical transport → Ground Ambulance** listings are returned.
+ *     summary: List provider ground ambulance listings (monitoring)
+ *     description: |
+ *       Returns Ground Ambulance listings owned by the provider, including whether each has a
+ *       linked dispatch account (`hasDispatchAccount`, `dispatchUserId`). Role: `service_provider`.
  *     security:
  *       - cookieAuth: []
  *     responses:
@@ -347,8 +439,10 @@
  * /api/dispatch/requests/{id}/accept:
  *   post:
  *     tags: [Dispatch]
- *     summary: Accept a dispatch offer
- *     description: Provider accepts within the offer window. Computes driving route and transitions to `accepted` (then `en_route` after first location ping).
+ *     summary: Accept a dispatch offer (crew only)
+ *     description: |
+ *       Dispatch crew accepts within the offer window. Computes driving route and transitions to
+ *       `accepted` (then `en_route` after the first location ping). Role: `dispatch`.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -377,13 +471,13 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a service provider account
+ *         description: Not a dispatch account / not the assigned crew
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       409:
- *         description: Offer expired or not found for this provider
+ *         description: Offer expired or not found for this crew
  *         content:
  *           application/json:
  *             schema:
@@ -392,8 +486,9 @@
  * /api/dispatch/requests/{id}/reject:
  *   post:
  *     tags: [Dispatch]
- *     summary: Reject a dispatch offer
- *     description: Provider declines the offer; backend cascades to the next nearest eligible ambulance.
+ *     summary: Decline a dispatch offer (crew only)
+ *     description: |
+ *       Dispatch crew declines. Backend may offer the next nearest eligible unit. Role: `dispatch`.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -404,7 +499,7 @@
  *           type: string
  *     responses:
  *       200:
- *         description: Offer rejected
+ *         description: Offer declined
  *         content:
  *           application/json:
  *             schema:
@@ -422,13 +517,13 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a service provider account
+ *         description: Not a dispatch account / not the assigned crew
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       404:
- *         description: Offer not found for this provider
+ *         description: Offer not found for this crew
  *         content:
  *           application/json:
  *             schema:
@@ -437,8 +532,10 @@
  * /api/dispatch/requests/{id}/arrived:
  *   patch:
  *     tags: [Dispatch]
- *     summary: Mark ambulance arrived at pickup
- *     description: Provider marks arrival when status is `accepted` or `en_route`. Notifies the client.
+ *     summary: Mark ambulance arrived at pickup (crew only)
+ *     description: |
+ *       Dispatch crew marks arrival when status is `accepted` or `en_route`. Notifies the client
+ *       and the provider owner. Role: `dispatch`.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -461,13 +558,13 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a service provider account
+ *         description: Not a dispatch account / not the assigned crew
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       404:
- *         description: Active dispatch not found for this provider
+ *         description: Active dispatch not found for this crew
  *         content:
  *           application/json:
  *             schema:
@@ -476,11 +573,12 @@
  * /api/dispatch/services/{serviceId}/dispatch:
  *   patch:
  *     tags: [Dispatch]
- *     summary: Toggle on-duty status for a ground ambulance listing
+ *     summary: Toggle on-duty status (crew only)
  *     description: |
- *       When enabling dispatch (`dispatchEnabled: true`), include current GPS coordinates **or** ensure
- *       a fresh live location was saved within the last 5 minutes (`DISPATCH_LOCATION_STALE_MS`).
- *       Disabling clears live location from the listing.
+ *       Go on/off duty for the linked ground ambulance listing.
+ *       When enabling (`dispatchEnabled: true`), include current GPS coordinates **or** ensure
+ *       a fresh live location was saved within the last 5 minutes.
+ *       Disabling clears live location from the listing. Role: `dispatch`.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -526,13 +624,13 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a service provider account
+ *         description: Not a dispatch account / listing not linked to this crew
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       404:
- *         description: Ground ambulance listing not found for this provider
+ *         description: Ground ambulance listing not found for this crew
  *         content:
  *           application/json:
  *             schema:
@@ -541,10 +639,11 @@
  * /api/dispatch/services/{serviceId}/location:
  *   patch:
  *     tags: [Dispatch]
- *     summary: Update live ambulance GPS
+ *     summary: Update live ambulance GPS (crew only)
  *     description: |
  *       Call every 5–10 seconds while on duty. Required while `dispatchEnabled: true`.
  *       First ping after accept transitions the assigned request from `accepted` to `en_route`.
+ *       Role: `dispatch`.
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -575,7 +674,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a service provider account
+ *         description: Not a dispatch account / listing not linked to this crew
  *         content:
  *           application/json:
  *             schema:

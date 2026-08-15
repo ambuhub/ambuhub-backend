@@ -57,6 +57,11 @@ const dispatchAttemptSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    dispatchUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     offeredAt: { type: Date, required: true },
     expiresAt: { type: Date, required: true },
     outcome: {
@@ -90,6 +95,8 @@ const ambulanceDispatchRequestSchema = new mongoose.Schema(
     },
     pickupAddress: { type: String, trim: true, default: null },
     pickupLocation: { type: geoPointSchema, required: true },
+    /** Number dispatch should call on arrival (snapshot; defaults from client profile). */
+    contactPhone: { type: String, trim: true, default: null, maxlength: 32 },
     clientNotes: { type: String, trim: true, default: null, maxlength: 1000 },
     assignedServiceId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -100,6 +107,12 @@ const ambulanceDispatchRequestSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
+    },
+    assignedDispatchUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
     },
     currentOfferExpiresAt: { type: Date, default: null },
     attempts: { type: [dispatchAttemptSchema], default: [] },

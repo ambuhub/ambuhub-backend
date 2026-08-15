@@ -11,6 +11,7 @@ export const GROUND_AMBULANCE_DEPARTMENT_SLUG = "ground-ambulance";
 export type NearestAmbulanceCandidate = {
   serviceId: string;
   providerUserId: string;
+  dispatchUserId: string;
   title: string;
   distanceMeters: number;
   lat: number;
@@ -110,6 +111,7 @@ export async function findNearestAmbulance(
     departmentSlug: GROUND_AMBULANCE_DEPARTMENT_SLUG,
     isAvailable: true,
     dispatchEnabled: true,
+    dispatchUserId: { $exists: true, $ne: null },
     liveLocation: { $exists: true, $ne: null },
     liveLocationUpdatedAt: { $gte: staleBefore },
     "liveLocation.coordinates.0": { $exists: true },
@@ -122,6 +124,7 @@ export async function findNearestAmbulance(
   const results = await Service.aggregate<{
     _id: mongoose.Types.ObjectId;
     userId: mongoose.Types.ObjectId;
+    dispatchUserId: mongoose.Types.ObjectId;
     title: string;
     liveLocation: { coordinates: [number, number] };
     distanceMeters: number;
@@ -138,10 +141,27 @@ export async function findNearestAmbulance(
         query: matchStage,
       },
     },
+    {
+      $lookup: {
+        from: "users",
+        localField: "dispatchUserId",
+        foreignField: "_id",
+        as: "dispatchUser",
+      },
+    },
+    {
+      $match: {
+        "dispatchUser.0": { $exists: true },
+        "dispatchUser.0.role": "dispatch",
+        "dispatchUser.0.isDisabled": { $ne: true },
+        "dispatchUser.0.isSuspended": { $ne: true },
+      },
+    },
     { $limit: 1 },
     {
       $project: {
         userId: 1,
+        dispatchUserId: 1,
         title: 1,
         liveLocation: 1,
         distanceMeters: 1,
@@ -165,6 +185,7 @@ export async function findNearestAmbulance(
   return {
     serviceId: candidate._id.toString(),
     providerUserId: candidate.userId.toString(),
+    dispatchUserId: candidate.dispatchUserId.toString(),
     title: candidate.title,
     distanceMeters: Math.round(candidate.distanceMeters),
     lat,

@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   authenticate,
   requireClient,
+  requireDispatch,
   requireServiceProvider,
 } from "../../shared/middlewares/authenticate";
 import {
@@ -11,6 +12,9 @@ import {
   getDispatchHistoryHandler,
   getDispatchRequestHandler,
   getDispatchRouteHandler,
+  getDispatchUserOfferHandler,
+  getDispatchUserRequestsHandler,
+  getDispatchUserServicesHandler,
   getProviderDispatchServicesHandler,
   getProviderDispatchRequestsHandler,
   getProviderOfferHandler,
@@ -49,6 +53,7 @@ router.get(
   getDispatchRouteHandler,
 );
 
+/** Provider monitoring (no offers / no duty). */
 router.get(
   "/provider/offer",
   authenticate,
@@ -67,34 +72,54 @@ router.get(
   requireServiceProvider,
   getProviderDispatchServicesHandler,
 );
+
+/** Dispatch crew ops. */
+router.get(
+  "/crew/offer",
+  authenticate,
+  requireDispatch,
+  getDispatchUserOfferHandler,
+);
+router.get(
+  "/crew/requests",
+  authenticate,
+  requireDispatch,
+  getDispatchUserRequestsHandler,
+);
+router.get(
+  "/crew/services",
+  authenticate,
+  requireDispatch,
+  getDispatchUserServicesHandler,
+);
 router.post(
   "/requests/:id/accept",
   authenticate,
-  requireServiceProvider,
+  requireDispatch,
   acceptDispatchRequestHandler,
 );
 router.post(
   "/requests/:id/reject",
   authenticate,
-  requireServiceProvider,
+  requireDispatch,
   rejectDispatchRequestHandler,
 );
 router.patch(
   "/requests/:id/arrived",
   authenticate,
-  requireServiceProvider,
+  requireDispatch,
   markDispatchArrivedHandler,
 );
 router.patch(
   "/services/:serviceId/dispatch",
   authenticate,
-  requireServiceProvider,
+  requireDispatch,
   patchServiceDispatchHandler,
 );
 router.patch(
   "/services/:serviceId/location",
   authenticate,
-  requireServiceProvider,
+  requireDispatch,
   patchServiceLocationHandler,
 );
 

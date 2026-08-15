@@ -40,6 +40,7 @@ type LeanServiceForCart = {
   currency?: string | null;
   pricingPeriod?: string | null;
   isAvailable?: boolean | null;
+  dispatchUserId?: mongoose.Types.ObjectId | null;
   departmentSlug: string;
   photoUrls: unknown;
   hireReturnWindow?: unknown;
@@ -287,6 +288,16 @@ export async function loadHireServiceForCheckout(
 
   if (lean.listingType !== "hire") {
     throw new CartHttpError(400, "Only hire listings can be booked this way");
+  }
+
+  if (
+    lean.dispatchUserId != null &&
+    String(lean.dispatchUserId).length > 0
+  ) {
+    throw new CartHttpError(
+      400,
+      "This ambulance is reserved for live dispatch and cannot be hired",
+    );
   }
 
   if (lean.isAvailable === false) {

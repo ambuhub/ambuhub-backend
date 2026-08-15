@@ -13,6 +13,7 @@ import notificationsRoutes from "../modules/notifications/notifications.routes";
 import walletRoutes from "../modules/wallet/wallet.routes";
 import marketplaceRoutes from "../modules/marketplace/marketplace.routes";
 import providerSubscriptionRoutes from "../modules/provider-subscription/subscription.routes";
+import dispatchAccountsRoutes from "../modules/provider-dispatch-accounts/dispatch-accounts.routes";
 import dispatchRoutes from "../modules/dispatch/dispatch.routes";
 
 export const setupRoutes = (app: Application): void => {
@@ -35,5 +36,6 @@ export const setupRoutes = (app: Application): void => {
   app.use("/api/wallet", walletRoutes);
   app.use("/api/marketplace", marketplaceRoutes);
   app.use("/api/provider/subscription", providerSubscriptionRoutes);
+  app.use("/api/provider/dispatch-accounts", dispatchAccountsRoutes);
   app.use("/api/dispatch", dispatchRoutes);
 };

@@ -22,6 +22,8 @@
     "backfill:provider-wallets-from-orders": "ts-node --transpile-only src/scripts/backfill-provider-wallets-from-orders.ts",
     "backfill:hire-return-notification-schedules": "ts-node --transpile-only src/scripts/backfill-hire-return-notification-schedules.ts",
     "backfill:order-line-kind-sale": "ts-node --transpile-only src/scripts/backfill-order-line-kind-sale.ts",
+    "backfill:email-verified": "ts-node --transpile-only src/scripts/backfill-email-verified-true.ts",
+    "backfill:dispatch-arrived": "ts-node --transpile-only src/scripts/backfill-dispatch-arrived.ts",
     "seed:admin": "ts-node --transpile-only src/scripts/seed-admin-user.ts",
     "e2e:push": "ts-node --transpile-only src/scripts/e2e-push-notifications.ts"
   },

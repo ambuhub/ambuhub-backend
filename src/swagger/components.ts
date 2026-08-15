@@ -27,7 +27,9 @@
  *
  *     UserRole:
  *       type: string
- *       enum: [client, service_provider, admin]
+ *       enum: [client, service_provider, admin, dispatch]
+ *       description: |
+ *         `dispatch` accounts are created by a service provider and cannot self-register.
  *
  *     ListingType:
  *       type: string

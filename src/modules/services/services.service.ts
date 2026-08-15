@@ -103,6 +103,8 @@ export interface MyServiceDto {
   bookingGapMinutes: number | null;
   /** Gap between bookings in hours (derived from stored minutes). */
   bookingGapHours: number | null;
+  /** Present when listing is linked to a dispatch crew account (not for hire). */
+  dispatchUserId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -150,6 +152,7 @@ type LeanPopulatedService = {
   bookingWindow?: unknown;
   hourlyBookingSchedule?: unknown;
   bookingGapMinutes?: number | null;
+  dispatchUserId?: mongoose.Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
   serviceCategoryId: PopulatedCategory | null;
@@ -233,6 +236,9 @@ function mapLeanServiceToDto(doc: LeanPopulatedService): MyServiceDto {
       typeof doc.bookingGapMinutes === "number" && doc.bookingGapMinutes >= 0
         ? gapMinutesToHours(doc.bookingGapMinutes)
         : null,
+    dispatchUserId: doc.dispatchUserId
+      ? doc.dispatchUserId.toString()
+      : null,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -256,9 +262,17 @@ function wrapLocationError(err: unknown): never {
 const MARKETPLACE_LISTING_CAP = 200;
 const MAX_FAVORITE_SERVICE_IDS = 200;
 
-/** Legacy documents may omit isAvailable; treat as listed. */
+/** Legacy documents may omit isAvailable; treat as listed. Exclude dispatch-linked listings. */
 const MARKETPLACE_AVAILABLE_FILTER = {
-  $or: [{ isAvailable: true }, { isAvailable: { $exists: false } }],
+  $and: [
+    { $or: [{ isAvailable: true }, { isAvailable: { $exists: false } }] },
+    {
+      $or: [
+        { dispatchUserId: null },
+        { dispatchUserId: { $exists: false } },
+      ],
+    },
+  ],
 } as const;
 
 export type MarketplaceServicesResult = {
@@ -476,9 +490,16 @@ async function loadServiceDetailById(
     _id: new mongoose.Types.ObjectId(trimmed),
   };
   if (options?.marketplaceOnly) {
-    filter.$or = [
-      { isAvailable: true },
-      { isAvailable: { $exists: false } },
+    filter.$and = [
+      {
+        $or: [{ isAvailable: true }, { isAvailable: { $exists: false } }],
+      },
+      {
+        $or: [
+          { dispatchUserId: null },
+          { dispatchUserId: { $exists: false } },
+        ],
+      },
     ];
   }
 
@@ -553,9 +574,19 @@ export async function listFavoriteServicesForUser(
   const rows = await Service.find({
     _id: { $in: rawIds },
     ...(countryCode ? { countryCode } : {}),
-    $or: [
-      { isAvailable: true },
-      { isAvailable: { $exists: false } },
+    $and: [
+      {
+        $or: [
+          { isAvailable: true },
+          { isAvailable: { $exists: false } },
+        ],
+      },
+      {
+        $or: [
+          { dispatchUserId: null },
+          { dispatchUserId: { $exists: false } },
+        ],
+      },
     ],
   })
     .populate<{ serviceCategoryId: PopulatedCategory | null }>(
@@ -1169,6 +1200,14 @@ export async function setServiceAvailability(
     throw new ServicesHttpError(404, "Service not found");
   }
 
+  const { syncDispatchAccountWithListingAvailability } = await import(
+    "../provider-dispatch-accounts/dispatch-accounts.service"
+  );
+  await syncDispatchAccountWithListingAvailability(
+    service._id.toString(),
+    isAvailable,
+  );
+
   const repopulated = await Service.findById(updated._id)
     .populate<{ serviceCategoryId: PopulatedCategory | null }>(
       "serviceCategoryId",
@@ -1319,6 +1358,16 @@ export async function updateBookingSettings(
   }).lean();
   if (!updated) {
     throw new ServicesHttpError(404, "Service not found");
+  }
+
+  if (input.isAvailable !== undefined) {
+    const { syncDispatchAccountWithListingAvailability } = await import(
+      "../provider-dispatch-accounts/dispatch-accounts.service"
+    );
+    await syncDispatchAccountWithListingAvailability(
+      service._id.toString(),
+      input.isAvailable,
+    );
   }
 
   const repopulated = await Service.findById(updated._id)

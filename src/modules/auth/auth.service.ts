@@ -101,6 +101,9 @@ export type PublicAuthUser = {
   businessName?: string;
   physicalAddress?: string;
   website?: string | null;
+  ownerProviderUserId?: string | null;
+  assignedServiceId?: string | null;
+  isDisabled?: boolean;
 };
 
 function toPublicUser(
@@ -114,6 +117,9 @@ function toPublicUser(
     role: UserRole;
     emailVerified: boolean;
     dateOfBirth?: Date | null;
+    ownerProviderUserId?: mongoose.Types.ObjectId | null;
+    assignedServiceId?: mongoose.Types.ObjectId | null;
+    isDisabled?: boolean;
   },
   provider: PublicAuthUserProvider | null,
 ): PublicAuthUser {
@@ -135,6 +141,15 @@ function toPublicUser(
     base.businessName = provider.businessName;
     base.physicalAddress = provider.physicalAddress;
     base.website = provider.website;
+  }
+  if (user.role === "dispatch") {
+    base.ownerProviderUserId = user.ownerProviderUserId
+      ? user.ownerProviderUserId.toString()
+      : null;
+    base.assignedServiceId = user.assignedServiceId
+      ? user.assignedServiceId.toString()
+      : null;
+    base.isDisabled = Boolean(user.isDisabled);
   }
   return base;
 }
@@ -223,6 +238,12 @@ export async function register(
   }
   if (role === "admin") {
     throw new AuthHttpError(400, "Admin accounts cannot be created via registration");
+  }
+  if (role === "dispatch") {
+    throw new AuthHttpError(
+      400,
+      "Dispatch accounts can only be created by a service provider",
+    );
   }
   if (role !== "client" && role !== "service_provider") {
     throw new AuthHttpError(400, "Invalid role");
@@ -402,6 +423,13 @@ export async function login(
 
   if (user.isSuspended) {
     throw new AuthHttpError(403, "This account has been suspended.");
+  }
+
+  if (user.role === "dispatch" && user.isDisabled) {
+    throw new AuthHttpError(
+      403,
+      "This dispatch account is disabled. Contact your service provider.",
+    );
   }
 
   if (user.role === "admin") {

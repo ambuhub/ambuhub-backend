@@ -48,12 +48,14 @@ export type CreateDispatchRequestInput = {
   longitude?: number;
   address?: string;
   notes?: string;
+  contactPhone?: string;
 };
 
 export type DispatchRequestDto = {
   id: string;
   status: DispatchStatus;
   pickup: { lat: number; lng: number; address: string | null };
+  contactPhone: string | null;
   clientNotes: string | null;
   assignedService?: {
     id: string;
@@ -133,6 +135,7 @@ async function mapDispatchRequest(
       lng: pickupCoords?.lng ?? 0,
       address: d.pickupAddress ?? null,
     },
+    contactPhone: d.contactPhone?.trim() || null,
     clientNotes: d.clientNotes ?? null,
     assignedService,
     attempts: d.attempts?.length ?? 0,
@@ -180,6 +183,45 @@ async function assertProviderRole(userId: string): Promise<void> {
   if (!user || user.role !== "service_provider") {
     throw new DispatchHttpError(403, "Only providers can perform this action");
   }
+}
+
+async function assertDispatchRole(userId: string): Promise<{
+  assignedServiceId: string;
+  ownerProviderUserId: string;
+}> {
+  const user = await User.findById(userId)
+    .select("role assignedServiceId ownerProviderUserId isDisabled")
+    .lean();
+  if (!user || user.role !== "dispatch") {
+    throw new DispatchHttpError(403, "Only dispatch accounts can perform this action");
+  }
+  if (user.isDisabled) {
+    throw new DispatchHttpError(403, "This dispatch account is disabled");
+  }
+  if (!user.assignedServiceId || !user.ownerProviderUserId) {
+    throw new DispatchHttpError(400, "Dispatch account is not linked to a listing");
+  }
+  return {
+    assignedServiceId: user.assignedServiceId.toString(),
+    ownerProviderUserId: user.ownerProviderUserId.toString(),
+  };
+}
+
+async function notifyOwnerDispatchStatus(
+  ownerProviderUserId: string,
+  requestId: string,
+  title: string,
+  body: string,
+): Promise<void> {
+  await NotificationService.send(
+    ownerProviderUserId,
+    NotificationTemplates.general({
+      title,
+      body,
+      deepLink: `/provider/dispatch/requests/${encodeURIComponent(requestId)}`,
+      entityId: requestId,
+    }),
+  );
 }
 
 async function assertRateLimit(clientUserId: string): Promise<void> {
@@ -240,13 +282,13 @@ function excludedServiceIds(
   return attempts.map((a) => a.serviceId.toString());
 }
 
-async function notifyProviderOfOffer(
+async function notifyDispatchOfOffer(
   requestId: string,
   candidate: NearestAmbulanceCandidate,
   pickupAddress: string | null,
 ): Promise<void> {
   await NotificationService.send(
-    candidate.providerUserId,
+    candidate.dispatchUserId,
     NotificationTemplates.ambulanceRequest({
       requestId,
       pickupAddress,
@@ -275,6 +317,7 @@ async function offerToNearestAmbulance(
     request.currentOfferExpiresAt = undefined;
     request.assignedServiceId = undefined;
     request.assignedProviderUserId = undefined;
+    request.assignedDispatchUserId = undefined;
     await request.save();
 
     await NotificationService.send(
@@ -294,10 +337,14 @@ async function offerToNearestAmbulance(
   request.assignedProviderUserId = new mongoose.Types.ObjectId(
     candidate.providerUserId,
   );
+  request.assignedDispatchUserId = new mongoose.Types.ObjectId(
+    candidate.dispatchUserId,
+  );
   request.currentOfferExpiresAt = expiresAt;
   request.attempts.push({
     serviceId: new mongoose.Types.ObjectId(candidate.serviceId),
     providerUserId: new mongoose.Types.ObjectId(candidate.providerUserId),
+    dispatchUserId: new mongoose.Types.ObjectId(candidate.dispatchUserId),
     offeredAt: now,
     expiresAt,
     outcome: "pending",
@@ -305,7 +352,7 @@ async function offerToNearestAmbulance(
   });
   await request.save();
 
-  await notifyProviderOfOffer(
+  await notifyDispatchOfOffer(
     request._id.toString(),
     candidate,
     request.pickupAddress ?? null,
@@ -344,12 +391,25 @@ export async function createDispatchRequest(
 
   const notes = input.notes?.trim().slice(0, 1000) ?? null;
 
+  let contactPhone = input.contactPhone?.trim().slice(0, 32) ?? "";
+  if (!contactPhone) {
+    const client = await User.findById(clientUserId).select("phone").lean();
+    contactPhone = client?.phone?.trim().slice(0, 32) ?? "";
+  }
+  if (!contactPhone) {
+    throw new DispatchHttpError(
+      400,
+      "A contact phone number is required for dispatch",
+    );
+  }
+
   const request = await AmbulanceDispatchRequest.create({
     clientUserId: new mongoose.Types.ObjectId(clientUserId),
     status: "searching",
     locationSource: input.locationSource,
     pickupAddress: pickup.address,
     pickupLocation: pointFromLngLat(pickup.lng, pickup.lat),
+    contactPhone,
     clientNotes: notes,
     attempts: [],
   });
@@ -380,14 +440,30 @@ export async function getDispatchRequestById(
   const isClient = request.clientUserId.toString() === userId;
   const isAssignedProvider =
     request.assignedProviderUserId?.toString() === userId;
+  const isAssignedDispatch =
+    request.assignedDispatchUserId?.toString() === userId;
 
   if (role === "client" && !isClient) {
     throw new DispatchHttpError(403, "Forbidden");
   }
   if (role === "service_provider" && !isAssignedProvider) {
+    // Owner can also view requests for any of their listings via attempt history
+    const ownsAttempt = (request.attempts ?? []).some(
+      (a) => a.providerUserId.toString() === userId,
+    );
+    if (!ownsAttempt) {
+      throw new DispatchHttpError(403, "Forbidden");
+    }
+  }
+  if (role === "dispatch" && !isAssignedDispatch) {
     throw new DispatchHttpError(403, "Forbidden");
   }
-  if (role !== "client" && role !== "service_provider" && role !== "admin") {
+  if (
+    role !== "client" &&
+    role !== "service_provider" &&
+    role !== "dispatch" &&
+    role !== "admin"
+  ) {
     throw new DispatchHttpError(403, "Forbidden");
   }
 
@@ -435,10 +511,42 @@ export async function getProviderPendingOffer(
     currentOfferExpiresAt: { $gt: new Date() },
   }).sort({ currentOfferExpiresAt: 1 });
 
+  // Providers no longer receive offers — monitoring only.
+  return null;
+}
+
+export async function getDispatchUserPendingOffer(
+  dispatchUserId: string,
+): Promise<DispatchRequestDto | null> {
+  await assertDispatchRole(dispatchUserId);
+
+  const request = await AmbulanceDispatchRequest.findOne({
+    assignedDispatchUserId: new mongoose.Types.ObjectId(dispatchUserId),
+    status: "offered",
+    currentOfferExpiresAt: { $gt: new Date() },
+  }).sort({ currentOfferExpiresAt: 1 });
+
   if (!request) {
     return null;
   }
   return mapDispatchRequest(request);
+}
+
+export async function getDispatchUserRequests(
+  dispatchUserId: string,
+): Promise<DispatchRequestDto[]> {
+  await assertDispatchRole(dispatchUserId);
+
+  const requests = await AmbulanceDispatchRequest.find({
+    $or: [
+      { assignedDispatchUserId: new mongoose.Types.ObjectId(dispatchUserId) },
+      { "attempts.dispatchUserId": new mongoose.Types.ObjectId(dispatchUserId) },
+    ],
+  })
+    .sort({ updatedAt: -1 })
+    .limit(50);
+
+  return Promise.all(requests.map((r) => mapDispatchRequest(r)));
 }
 
 export async function getProviderDispatchRequests(
@@ -456,10 +564,10 @@ export async function getProviderDispatchRequests(
 }
 
 export async function acceptDispatchRequest(
-  providerUserId: string,
+  dispatchUserId: string,
   requestId: string,
 ): Promise<DispatchRequestDto> {
-  await assertProviderRole(providerUserId);
+  await assertDispatchRole(dispatchUserId);
 
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
     throw new DispatchHttpError(400, "Invalid request id");
@@ -468,7 +576,7 @@ export async function acceptDispatchRequest(
   const now = new Date();
   const request = await AmbulanceDispatchRequest.findOne({
     _id: new mongoose.Types.ObjectId(requestId),
-    assignedProviderUserId: new mongoose.Types.ObjectId(providerUserId),
+    assignedDispatchUserId: new mongoose.Types.ObjectId(dispatchUserId),
     status: "offered",
     currentOfferExpiresAt: { $gt: now },
   });
@@ -525,14 +633,23 @@ export async function acceptDispatchRequest(
     NotificationTemplates.ambulanceAccepted({ requestId: request._id.toString() }),
   );
 
+  if (request.assignedProviderUserId) {
+    await notifyOwnerDispatchStatus(
+      request.assignedProviderUserId.toString(),
+      request._id.toString(),
+      "Dispatch accepted",
+      `${service.title} accepted an ambulance request.`,
+    );
+  }
+
   return mapDispatchRequest(request);
 }
 
 export async function rejectDispatchRequest(
-  providerUserId: string,
+  dispatchUserId: string,
   requestId: string,
 ): Promise<DispatchRequestDto> {
-  await assertProviderRole(providerUserId);
+  await assertDispatchRole(dispatchUserId);
 
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
     throw new DispatchHttpError(400, "Invalid request id");
@@ -540,13 +657,16 @@ export async function rejectDispatchRequest(
 
   const request = await AmbulanceDispatchRequest.findOne({
     _id: new mongoose.Types.ObjectId(requestId),
-    assignedProviderUserId: new mongoose.Types.ObjectId(providerUserId),
+    assignedDispatchUserId: new mongoose.Types.ObjectId(dispatchUserId),
     status: "offered",
   });
 
   if (!request) {
     throw new DispatchHttpError(404, "Offer not found");
   }
+
+  const ownerId = request.assignedProviderUserId?.toString();
+  const serviceId = request.assignedServiceId?.toString();
 
   const pendingAttempt = request.attempts.find(
     (a) =>
@@ -559,9 +679,22 @@ export async function rejectDispatchRequest(
 
   request.assignedServiceId = undefined;
   request.assignedProviderUserId = undefined;
+  request.assignedDispatchUserId = undefined;
   request.currentOfferExpiresAt = undefined;
   request.status = "searching";
   await request.save();
+
+  if (ownerId) {
+    const service = serviceId
+      ? await Service.findById(serviceId).select("title").lean()
+      : null;
+    await notifyOwnerDispatchStatus(
+      ownerId,
+      request._id.toString(),
+      "Dispatch declined",
+      `${service?.title ?? "A unit"} declined an ambulance request.`,
+    );
+  }
 
   await offerToNearestAmbulance(request);
 
@@ -600,6 +733,7 @@ export async function cancelDispatchRequest(
   }
 
   const providerUserId = request.assignedProviderUserId?.toString();
+  const dispatchUserId = request.assignedDispatchUserId?.toString();
 
   if (request.status === "offered") {
     const pendingAttempt = request.attempts.find((a) => a.outcome === "pending");
@@ -613,12 +747,20 @@ export async function cancelDispatchRequest(
   request.currentOfferExpiresAt = undefined;
   await request.save();
 
-  if (providerUserId) {
+  if (dispatchUserId) {
     await NotificationService.send(
-      providerUserId,
+      dispatchUserId,
       NotificationTemplates.dispatchCancelled({
         requestId: request._id.toString(),
       }),
+    );
+  }
+  if (providerUserId) {
+    await notifyOwnerDispatchStatus(
+      providerUserId,
+      request._id.toString(),
+      "Dispatch cancelled",
+      "A client cancelled an ambulance request for your fleet.",
     );
   }
 
@@ -626,14 +768,14 @@ export async function cancelDispatchRequest(
 }
 
 export async function markDispatchArrived(
-  providerUserId: string,
+  dispatchUserId: string,
   requestId: string,
 ): Promise<DispatchRequestDto> {
-  await assertProviderRole(providerUserId);
+  await assertDispatchRole(dispatchUserId);
 
   const request = await AmbulanceDispatchRequest.findOne({
     _id: new mongoose.Types.ObjectId(requestId),
-    assignedProviderUserId: new mongoose.Types.ObjectId(providerUserId),
+    assignedDispatchUserId: new mongoose.Types.ObjectId(dispatchUserId),
     status: { $in: ["accepted", "en_route"] },
   });
 
@@ -650,31 +792,50 @@ export async function markDispatchArrived(
     NotificationTemplates.ambulanceArrived({ requestId: request._id.toString() }),
   );
 
+  if (request.assignedProviderUserId) {
+    await notifyOwnerDispatchStatus(
+      request.assignedProviderUserId.toString(),
+      request._id.toString(),
+      "Ambulance arrived",
+      "A dispatch unit marked arrival at the pickup location.",
+    );
+  }
+
   return mapDispatchRequest(request);
 }
 
 export async function updateServiceDispatchStatus(
-  providerUserId: string,
+  dispatchUserId: string,
   serviceId: string,
   dispatchEnabled: boolean,
   location?: { latitude: number; longitude: number },
 ): Promise<{ serviceId: string; dispatchEnabled: boolean }> {
-  await assertProviderRole(providerUserId);
+  const profile = await assertDispatchRole(dispatchUserId);
 
   if (!mongoose.Types.ObjectId.isValid(serviceId)) {
     throw new DispatchHttpError(400, "Invalid service id");
   }
+  if (profile.assignedServiceId !== serviceId) {
+    throw new DispatchHttpError(403, "You can only control your linked ambulance");
+  }
 
   const service = await Service.findOne({
     _id: new mongoose.Types.ObjectId(serviceId),
-    userId: new mongoose.Types.ObjectId(providerUserId),
+    dispatchUserId: new mongoose.Types.ObjectId(dispatchUserId),
     departmentSlug: GROUND_AMBULANCE_DEPARTMENT_SLUG,
   });
 
   if (!service) {
     throw new DispatchHttpError(
       404,
-      "Ground ambulance listing not found for this provider",
+      "Ground ambulance listing not found for this dispatch account",
+    );
+  }
+
+  if (service.isAvailable === false) {
+    throw new DispatchHttpError(
+      403,
+      "This listing is unavailable. Contact your service provider.",
     );
   }
 
@@ -724,12 +885,12 @@ export async function updateServiceDispatchStatus(
 }
 
 export async function updateServiceLiveLocation(
-  providerUserId: string,
+  dispatchUserId: string,
   serviceId: string,
   latitude: number,
   longitude: number,
 ): Promise<void> {
-  await assertProviderRole(providerUserId);
+  const profile = await assertDispatchRole(dispatchUserId);
 
   if (
     !Number.isFinite(latitude) ||
@@ -742,9 +903,13 @@ export async function updateServiceLiveLocation(
     throw new DispatchHttpError(400, "Valid latitude and longitude are required");
   }
 
+  if (profile.assignedServiceId !== serviceId) {
+    throw new DispatchHttpError(403, "You can only update your linked ambulance");
+  }
+
   const service = await Service.findOne({
     _id: new mongoose.Types.ObjectId(serviceId),
-    userId: new mongoose.Types.ObjectId(providerUserId),
+    dispatchUserId: new mongoose.Types.ObjectId(dispatchUserId),
     departmentSlug: GROUND_AMBULANCE_DEPARTMENT_SLUG,
     dispatchEnabled: true,
   });
@@ -789,8 +954,8 @@ export async function updateServiceLiveLocation(
   await activeRequest.save();
 }
 
-export async function listProviderDispatchServices(
-  providerUserId: string,
+export async function listDispatchUserServices(
+  dispatchUserId: string,
 ): Promise<
   {
     id: string;
@@ -799,13 +964,44 @@ export async function listProviderDispatchServices(
     liveLocationUpdatedAt: string | null;
   }[]
 > {
+  const profile = await assertDispatchRole(dispatchUserId);
+  const service = await Service.findById(profile.assignedServiceId)
+    .select("title dispatchEnabled liveLocationUpdatedAt")
+    .lean();
+  if (!service) {
+    return [];
+  }
+  return [
+    {
+      id: service._id.toString(),
+      title: service.title,
+      dispatchEnabled: Boolean(service.dispatchEnabled),
+      liveLocationUpdatedAt: service.liveLocationUpdatedAt
+        ? service.liveLocationUpdatedAt.toISOString()
+        : null,
+    },
+  ];
+}
+
+export async function listProviderDispatchServices(
+  providerUserId: string,
+): Promise<
+  {
+    id: string;
+    title: string;
+    dispatchEnabled: boolean;
+    liveLocationUpdatedAt: string | null;
+    dispatchUserId: string | null;
+    hasDispatchAccount: boolean;
+  }[]
+> {
   await assertProviderRole(providerUserId);
 
   const services = await Service.find({
     userId: new mongoose.Types.ObjectId(providerUserId),
     departmentSlug: GROUND_AMBULANCE_DEPARTMENT_SLUG,
   })
-    .select("title dispatchEnabled liveLocationUpdatedAt")
+    .select("title dispatchEnabled liveLocationUpdatedAt dispatchUserId")
     .sort({ createdAt: -1 })
     .lean();
 
@@ -816,6 +1012,8 @@ export async function listProviderDispatchServices(
     liveLocationUpdatedAt: s.liveLocationUpdatedAt
       ? s.liveLocationUpdatedAt.toISOString()
       : null,
+    dispatchUserId: s.dispatchUserId ? s.dispatchUserId.toString() : null,
+    hasDispatchAccount: Boolean(s.dispatchUserId),
   }));
 }
 
@@ -833,11 +1031,27 @@ export async function processExpiredDispatchOffers(): Promise<number> {
       pendingAttempt.outcome = "timeout";
     }
 
+    const ownerId = request.assignedProviderUserId?.toString();
+    const serviceId = request.assignedServiceId?.toString();
+
     request.assignedServiceId = undefined;
     request.assignedProviderUserId = undefined;
+    request.assignedDispatchUserId = undefined;
     request.currentOfferExpiresAt = undefined;
     request.status = "searching";
     await request.save();
+
+    if (ownerId) {
+      const service = serviceId
+        ? await Service.findById(serviceId).select("title").lean()
+        : null;
+      await notifyOwnerDispatchStatus(
+        ownerId,
+        request._id.toString(),
+        "Dispatch offer timed out",
+        `${service?.title ?? "A unit"} did not respond in time.`,
+      );
+    }
 
     await offerToNearestAmbulance(request);
     processed += 1;
