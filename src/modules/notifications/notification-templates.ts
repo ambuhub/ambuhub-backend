@@ -273,7 +273,7 @@ export const NotificationTemplates = {
       "ambulance_request",
       "New ambulance request",
       `New request near ${locationLabel} (${input.distanceKm.toFixed(1)} km away). Respond within 4 minutes.`,
-      "/dispatch/requests",
+      `/dispatch/requests/${encodeURIComponent(input.requestId)}`,
       {
         entityId: input.requestId,
         serviceId: undefined,

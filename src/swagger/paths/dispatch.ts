@@ -274,7 +274,7 @@
  *       - cookieAuth: []
  *     responses:
  *       200:
- *         description: Always `{ offer: null }` for providers
+ *         description: "Always `{ offer: null }` for providers"
  *         content:
  *           application/json:
  *             schema:

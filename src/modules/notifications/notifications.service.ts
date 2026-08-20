@@ -94,10 +94,14 @@ async function assertNotificationUser(userId: string): Promise<void> {
   if (!user) {
     throw new NotificationsHttpError(401, "Unauthorized");
   }
-  if (user.role !== "client" && user.role !== "service_provider") {
+  if (
+    user.role !== "client" &&
+    user.role !== "service_provider" &&
+    user.role !== "dispatch"
+  ) {
     throw new NotificationsHttpError(
       403,
-      "Only client and provider accounts can access notifications",
+      "Only client, provider, and dispatch accounts can access notifications",
     );
   }
 }

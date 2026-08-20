@@ -3,7 +3,7 @@
  * /api/notifications/me:
  *   get:
  *     tags: [Notifications]
- *     summary: List in-app notifications for the current user (client or provider)
+ *     summary: List in-app notifications for the current user (client, provider, or dispatch)
  *     security:
  *       - cookieAuth: []
  *     parameters:
@@ -39,7 +39,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a client or provider account
+ *         description: Not a client, provider, or dispatch account
  *         content:
  *           application/json:
  *             schema:
@@ -65,7 +65,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a client or provider account
+ *         description: Not a client, provider, or dispatch account
  *         content:
  *           application/json:
  *             schema:
@@ -91,7 +91,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a client or provider account
+ *         description: Not a client, provider, or dispatch account
  *         content:
  *           application/json:
  *             schema:
@@ -129,7 +129,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorMessage'
  *       403:
- *         description: Not a client or provider account
+ *         description: Not a client, provider, or dispatch account
  *         content:
  *           application/json:
  *             schema:
